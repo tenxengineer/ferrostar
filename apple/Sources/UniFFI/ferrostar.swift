@@ -882,6 +882,112 @@ public func FfiConverterTypeDistanceEntryAndExitCondition_lower(_ value: Distanc
 
 
 
+public protocol DistanceEntryAndExitWithUTurnConfirmationConditionProtocol: AnyObject, Sendable {
+    
+}
+open class DistanceEntryAndExitWithUTurnConfirmationCondition: DistanceEntryAndExitWithUTurnConfirmationConditionProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_ferrostar_fn_clone_distanceentryandexitwithuturnconfirmationcondition(self.handle, $0) }
+    }
+    // No primary constructor declared for this class.
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_ferrostar_fn_free_distanceentryandexitwithuturnconfirmationcondition(handle, $0) }
+    }
+
+    
+
+    
+
+    
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeDistanceEntryAndExitWithUTurnConfirmationCondition: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = DistanceEntryAndExitWithUTurnConfirmationCondition
+
+    public static func lift(_ handle: UInt64) throws -> DistanceEntryAndExitWithUTurnConfirmationCondition {
+        return DistanceEntryAndExitWithUTurnConfirmationCondition(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: DistanceEntryAndExitWithUTurnConfirmationCondition) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DistanceEntryAndExitWithUTurnConfirmationCondition {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: DistanceEntryAndExitWithUTurnConfirmationCondition, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDistanceEntryAndExitWithUTurnConfirmationCondition_lift(_ handle: UInt64) throws -> DistanceEntryAndExitWithUTurnConfirmationCondition {
+    return try FfiConverterTypeDistanceEntryAndExitWithUTurnConfirmationCondition.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDistanceEntryAndExitWithUTurnConfirmationCondition_lower(_ value: DistanceEntryAndExitWithUTurnConfirmationCondition) -> UInt64 {
+    return FfiConverterTypeDistanceEntryAndExitWithUTurnConfirmationCondition.lower(value)
+}
+
+
+
+
+
+
 /**
  * A stateful condition that requires the user to reach the end of the step then proceed past it to advance.
  *
@@ -8712,6 +8818,8 @@ public enum SerializableStepAdvanceCondition: Equatable, Hashable, Codable {
     )
     case distanceEntryAndSnappedExit(distanceToEndOfStep: UInt16, distanceAfterEndStep: UInt16, minimumHorizontalAccuracy: UInt16, hasReachedEndOfCurrentStep: Bool
     )
+    case distanceEntryAndExitWithUTurnConfirmation(distanceToEndOfStep: UInt16, distanceAfterEndStep: UInt16, minimumHorizontalAccuracy: UInt16, minimumSignificantMovement: UInt16, maximumPlausibleSpeed: UInt16, plausibilityDistanceAllowance: UInt16, requiredConfirmations: UInt8, uturnConfirmationEnabled: Bool, candidateIsUturn: Bool?, candidateSuccessor: [SerializableStepAdvanceCondition], confirmationActive: Bool, movementAnchor: UserLocation?, confirmationCount: UInt8, lastEvaluatedTimestamp: Date?
+    )
     case orAdvanceConditions(conditions: [SerializableStepAdvanceCondition]
     )
     case andAdvanceConditions(conditions: [SerializableStepAdvanceCondition]
@@ -8751,10 +8859,13 @@ public struct FfiConverterTypeSerializableStepAdvanceCondition: FfiConverterRust
         case 5: return .distanceEntryAndSnappedExit(distanceToEndOfStep: try FfiConverterUInt16.read(from: &buf), distanceAfterEndStep: try FfiConverterUInt16.read(from: &buf), minimumHorizontalAccuracy: try FfiConverterUInt16.read(from: &buf), hasReachedEndOfCurrentStep: try FfiConverterBool.read(from: &buf)
         )
         
-        case 6: return .orAdvanceConditions(conditions: try FfiConverterSequenceTypeSerializableStepAdvanceCondition.read(from: &buf)
+        case 6: return .distanceEntryAndExitWithUTurnConfirmation(distanceToEndOfStep: try FfiConverterUInt16.read(from: &buf), distanceAfterEndStep: try FfiConverterUInt16.read(from: &buf), minimumHorizontalAccuracy: try FfiConverterUInt16.read(from: &buf), minimumSignificantMovement: try FfiConverterUInt16.read(from: &buf), maximumPlausibleSpeed: try FfiConverterUInt16.read(from: &buf), plausibilityDistanceAllowance: try FfiConverterUInt16.read(from: &buf), requiredConfirmations: try FfiConverterUInt8.read(from: &buf), uturnConfirmationEnabled: try FfiConverterBool.read(from: &buf), candidateIsUturn: try FfiConverterOptionBool.read(from: &buf), candidateSuccessor: try FfiConverterSequenceTypeSerializableStepAdvanceCondition.read(from: &buf), confirmationActive: try FfiConverterBool.read(from: &buf), movementAnchor: try FfiConverterOptionTypeUserLocation.read(from: &buf), confirmationCount: try FfiConverterUInt8.read(from: &buf), lastEvaluatedTimestamp: try FfiConverterOptionTimestamp.read(from: &buf)
         )
         
-        case 7: return .andAdvanceConditions(conditions: try FfiConverterSequenceTypeSerializableStepAdvanceCondition.read(from: &buf)
+        case 7: return .orAdvanceConditions(conditions: try FfiConverterSequenceTypeSerializableStepAdvanceCondition.read(from: &buf)
+        )
+        
+        case 8: return .andAdvanceConditions(conditions: try FfiConverterSequenceTypeSerializableStepAdvanceCondition.read(from: &buf)
         )
         
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -8798,13 +8909,31 @@ public struct FfiConverterTypeSerializableStepAdvanceCondition: FfiConverterRust
             FfiConverterBool.write(hasReachedEndOfCurrentStep, into: &buf)
             
         
-        case let .orAdvanceConditions(conditions):
+        case let .distanceEntryAndExitWithUTurnConfirmation(distanceToEndOfStep,distanceAfterEndStep,minimumHorizontalAccuracy,minimumSignificantMovement,maximumPlausibleSpeed,plausibilityDistanceAllowance,requiredConfirmations,uturnConfirmationEnabled,candidateIsUturn,candidateSuccessor,confirmationActive,movementAnchor,confirmationCount,lastEvaluatedTimestamp):
             writeInt(&buf, Int32(6))
+            FfiConverterUInt16.write(distanceToEndOfStep, into: &buf)
+            FfiConverterUInt16.write(distanceAfterEndStep, into: &buf)
+            FfiConverterUInt16.write(minimumHorizontalAccuracy, into: &buf)
+            FfiConverterUInt16.write(minimumSignificantMovement, into: &buf)
+            FfiConverterUInt16.write(maximumPlausibleSpeed, into: &buf)
+            FfiConverterUInt16.write(plausibilityDistanceAllowance, into: &buf)
+            FfiConverterUInt8.write(requiredConfirmations, into: &buf)
+            FfiConverterBool.write(uturnConfirmationEnabled, into: &buf)
+            FfiConverterOptionBool.write(candidateIsUturn, into: &buf)
+            FfiConverterSequenceTypeSerializableStepAdvanceCondition.write(candidateSuccessor, into: &buf)
+            FfiConverterBool.write(confirmationActive, into: &buf)
+            FfiConverterOptionTypeUserLocation.write(movementAnchor, into: &buf)
+            FfiConverterUInt8.write(confirmationCount, into: &buf)
+            FfiConverterOptionTimestamp.write(lastEvaluatedTimestamp, into: &buf)
+            
+        
+        case let .orAdvanceConditions(conditions):
+            writeInt(&buf, Int32(7))
             FfiConverterSequenceTypeSerializableStepAdvanceCondition.write(conditions, into: &buf)
             
         
         case let .andAdvanceConditions(conditions):
-            writeInt(&buf, Int32(7))
+            writeInt(&buf, Int32(8))
             FfiConverterSequenceTypeSerializableStepAdvanceCondition.write(conditions, into: &buf)
             
         }
@@ -9812,6 +9941,30 @@ fileprivate struct FfiConverterOptionData: FfiConverterRustBuffer {
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterData.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTimestamp: FfiConverterRustBuffer {
+    typealias SwiftType = Date?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTimestamp.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTimestamp.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }
@@ -10920,6 +11073,20 @@ public func stepAdvanceDistanceEntryAndExit(distanceToEndOfStep: UInt16, distanc
     )
 })
 }
+public func stepAdvanceDistanceEntryAndExitWithUturnConfirmation(distanceToEndOfStep: UInt16, distanceAfterEndOfStep: UInt16, minimumHorizontalAccuracy: UInt16, minimumSignificantMovement: UInt16, maximumPlausibleSpeed: UInt16, plausibilityDistanceAllowance: UInt16, requiredConfirmations: UInt8, uturnConfirmationEnabled: Bool) -> StepAdvanceCondition  {
+    return try!  FfiConverterTypeStepAdvanceCondition_lift(try! rustCall() {
+    uniffi_ferrostar_fn_func_step_advance_distance_entry_and_exit_with_uturn_confirmation(
+        FfiConverterUInt16.lower(distanceToEndOfStep),
+        FfiConverterUInt16.lower(distanceAfterEndOfStep),
+        FfiConverterUInt16.lower(minimumHorizontalAccuracy),
+        FfiConverterUInt16.lower(minimumSignificantMovement),
+        FfiConverterUInt16.lower(maximumPlausibleSpeed),
+        FfiConverterUInt16.lower(plausibilityDistanceAllowance),
+        FfiConverterUInt8.lower(requiredConfirmations),
+        FfiConverterBool.lower(uturnConfirmationEnabled),$0
+    )
+})
+}
 /**
  * Convenience function for creating a [`DistanceEntryAndSnappedExitCondition`].
  *
@@ -11133,6 +11300,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_ferrostar_checksum_func_step_advance_distance_entry_and_exit() != 35865) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_ferrostar_checksum_func_step_advance_distance_entry_and_exit_with_uturn_confirmation() != 37195) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_ferrostar_checksum_func_step_advance_distance_entry_and_snapped_exit() != 17502) {

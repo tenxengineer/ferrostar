@@ -107,6 +107,43 @@ private class MockCustomRouteProvider: CustomRouteProvider {
 }
 
 final class FerrostarCoreTests: XCTestCase {
+    func testKAN69GeneratedFactoryEvaluatesThroughSwiftBinding() {
+        let condition =
+            stepAdvanceDistanceEntryAndExitWithUturnConfirmation(
+                distanceToEndOfStep: 30,
+                distanceAfterEndOfStep: 5,
+                minimumHorizontalAccuracy: 32,
+                minimumSignificantMovement: 5,
+                maximumPlausibleSpeed: 70,
+                plausibilityDistanceAllowance: 10,
+                requiredConfirmations: 2,
+                uturnConfirmationEnabled: true
+            )
+        let config = NavigationControllerConfig(
+            waypointAdvance: .waypointWithinRange(100),
+            stepAdvanceCondition: condition,
+            arrivalStepAdvanceCondition: stepAdvanceManual(),
+            routeDeviationTracking: .none,
+            snappedLocationCourseFiltering: .raw
+        )
+        let session = createNavigationSession(
+            route: mockRoute,
+            config: config,
+            observers: []
+        )
+        let location = UserLocation(
+            coordinates: mockRoute.geometry[0],
+            horizontalAccuracy: 5,
+            courseOverGround: nil,
+            timestamp: Date(timeIntervalSince1970: 0),
+            speed: nil
+        )
+        let result = condition.shouldAdvanceStep(
+            tripState: session.getInitialState(location: location).tripState
+        )
+        XCTAssertFalse(result.shouldAdvance)
+    }
+
     func test401UnauthorizedRouteResponse() async throws {
         let mockSession = MockURLSession()
         mockSession.registerMock(

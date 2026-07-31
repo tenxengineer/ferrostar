@@ -25,8 +25,10 @@ public struct DynamicallyOrientingNavigationView: View {
     @Environment(\.navigationInnerGridConfiguration) private var gridConfig
 
     let isMuted: Bool
+    let showZoom: Bool
     let onTapMute: () -> Void
     var onTapExit: (() -> Void)?
+    var onStyleLoaded: ((MLNStyle) -> Void)?
 
     public var minimumSafeAreaInsets: EdgeInsets
 
@@ -51,18 +53,22 @@ public struct DynamicallyOrientingNavigationView: View {
         navigationState: NavigationState?,
         locationManagerConfiguration: NavigationLocationManagerConfiguration? = nil,
         isMuted: Bool,
+        showZoom: Bool = true,
         minimumSafeAreaInsets: EdgeInsets = EdgeInsets(top: 16, leading: 16, bottom: 16, trailing: 16),
         onTapMute: @escaping () -> Void,
         onTapExit: (() -> Void)? = nil,
+        onStyleLoaded: ((MLNStyle) -> Void)? = nil,
         @MapViewContentBuilder makeMapContent: () -> [StyleLayerDefinition] = { [] }
     ) {
         self.styleURL = styleURL
         self.navigationState = navigationState
         self.locationManagerConfiguration = locationManagerConfiguration
         self.isMuted = isMuted
+        self.showZoom = showZoom
         self.minimumSafeAreaInsets = minimumSafeAreaInsets
         self.onTapMute = onTapMute
         self.onTapExit = onTapExit
+        self.onStyleLoaded = onStyleLoaded
 
         userLayers = makeMapContent()
 
@@ -81,10 +87,11 @@ public struct DynamicallyOrientingNavigationView: View {
                     onUserTrackingModeChanged: { mode, _ in
                         userTrackingMode = mode
                     },
-                    onStyleLoaded: { _ in
+                    onStyleLoaded: { style in
                         if isNavigating {
                             camera = navigationCamera
                         }
+                        onStyleLoaded?(style)
                     }
                 ) {
                     userLayers
@@ -98,7 +105,7 @@ public struct DynamicallyOrientingNavigationView: View {
                         isMuted: isMuted,
                         showMute: navigationState?.isNavigating == true,
                         onMute: onTapMute,
-                        showZoom: isNavigating,
+                        showZoom: showZoom && isNavigating,
                         onZoomIn: { camera.incrementZoom(by: 1) },
                         onZoomOut: { camera.incrementZoom(by: -1) },
                         cameraControlState: cameraControlState,
@@ -123,7 +130,7 @@ public struct DynamicallyOrientingNavigationView: View {
                         isMuted: isMuted,
                         showMute: navigationState?.isNavigating == true,
                         onMute: onTapMute,
-                        showZoom: isNavigating,
+                        showZoom: showZoom && isNavigating,
                         onZoomIn: { camera.incrementZoom(by: 1) },
                         onZoomOut: { camera.incrementZoom(by: -1) },
                         cameraControlState: cameraControlState,
@@ -143,6 +150,10 @@ public struct DynamicallyOrientingNavigationView: View {
                 }
             }
         }
+        .onChange(of: isNavigating) { navigating in
+            guard navigating else { return }
+            recenterNavigationCamera()
+        }
     }
 
     private var isNavigating: Bool {
@@ -159,6 +170,26 @@ public struct DynamicallyOrientingNavigationView: View {
             setCamera: { camera = $0 }
         )
         .cameraControlState()
+    }
+
+    func recenterNavigationCamera() {
+        let state = NavigationCameraControlResolver(
+            isNavigating: true,
+            camera: camera,
+            userTrackingMode: .none,
+            navigationCamera: navigationCamera,
+            routeOverviewCamera: navigationState?.routeOverviewCamera,
+            setCamera: { camera = $0 }
+        )
+        .cameraControlState()
+
+        switch state {
+        case let .showRecenter(action),
+             let .showCurrentLocation(action):
+            action()
+        case .hidden, .showRouteOverview:
+            break
+        }
     }
 }
 

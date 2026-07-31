@@ -98,9 +98,6 @@ if $ffi_only; then
   exit 0
 fi
 
-# enable githooks, so swiftformat runs as a pre commit hook
-git config core.hooksPath .githooks
-
 cargo build -p $basename --lib --release --target aarch64-apple-ios-sim
 cargo build -p $basename --lib --release --target x86_64-apple-ios
 

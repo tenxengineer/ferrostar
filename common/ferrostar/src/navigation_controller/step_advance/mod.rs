@@ -1,14 +1,22 @@
 //! Step advance condition traits and implementations.
+use crate::models::UserLocation;
 use crate::navigation_controller::{
     models::TripState,
     step_advance::conditions::{
         AndAdvanceConditions, DeviationCalculationPolicy, DistanceEntryAndExitCondition,
-        DistanceEntryAndSnappedExitCondition, DistanceFromStepCondition,
-        DistanceToEndOfStepCondition, ManualStepCondition, OrAdvanceConditions,
+        DistanceEntryAndExitWithUTurnConfirmationCondition, DistanceEntryAndSnappedExitCondition,
+        DistanceFromStepCondition, DistanceToEndOfStepCondition, ManualStepCondition,
+        OrAdvanceConditions,
     },
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+
+#[cfg(all(feature = "std", not(feature = "web-time")))]
+use std::time::SystemTime;
+
+#[cfg(feature = "web-time")]
+use web_time::SystemTime;
 
 #[cfg(feature = "wasm-bindgen")]
 use tsify::Tsify;
@@ -131,6 +139,23 @@ pub enum SerializableStepAdvanceCondition {
         has_reached_end_of_current_step: bool,
     },
     #[cfg_attr(feature = "wasm-bindgen", serde(rename_all = "camelCase"))]
+    DistanceEntryAndExitWithUTurnConfirmation {
+        distance_to_end_of_step: u16,
+        distance_after_end_step: u16,
+        minimum_horizontal_accuracy: u16,
+        minimum_significant_movement: u16,
+        maximum_plausible_speed: u16,
+        plausibility_distance_allowance: u16,
+        required_confirmations: u8,
+        uturn_confirmation_enabled: bool,
+        candidate_is_uturn: Option<bool>,
+        candidate_successor: Vec<SerializableStepAdvanceCondition>,
+        confirmation_active: bool,
+        movement_anchor: Option<UserLocation>,
+        confirmation_count: u8,
+        last_evaluated_timestamp: Option<SystemTime>,
+    },
+    #[cfg_attr(feature = "wasm-bindgen", serde(rename_all = "camelCase"))]
     OrAdvanceConditions {
         conditions: Vec<SerializableStepAdvanceCondition>,
     },
@@ -182,6 +207,134 @@ impl From<SerializableStepAdvanceCondition> for Arc<dyn StepAdvanceCondition> {
                 distance_after_end_of_step: distance_after_end_step,
                 has_reached_end_of_current_step,
             }),
+            SerializableStepAdvanceCondition::DistanceEntryAndExitWithUTurnConfirmation {
+                distance_to_end_of_step,
+                distance_after_end_step,
+                minimum_horizontal_accuracy,
+                minimum_significant_movement,
+                maximum_plausible_speed,
+                plausibility_distance_allowance,
+                required_confirmations,
+                uturn_confirmation_enabled,
+                candidate_is_uturn,
+                candidate_successor,
+                confirmation_active,
+                movement_anchor,
+                confirmation_count,
+                last_evaluated_timestamp,
+            } => {
+                let clean = || -> Arc<dyn StepAdvanceCondition> {
+                    Arc::new(DistanceEntryAndExitWithUTurnConfirmationCondition {
+                        distance_to_end_of_step,
+                        distance_after_end_of_step: distance_after_end_step,
+                        minimum_horizontal_accuracy,
+                        minimum_significant_movement,
+                        maximum_plausible_speed,
+                        plausibility_distance_allowance,
+                        required_confirmations,
+                        uturn_confirmation_enabled,
+                        candidate_is_uturn: None,
+                        candidate_successor: None,
+                        confirmation_active: false,
+                        movement_anchor: None,
+                        confirmation_count: 0,
+                        last_evaluated_timestamp,
+                    })
+                };
+
+                let nested_matches_config = |candidate: &SerializableStepAdvanceCondition| -> bool {
+                    match candidate {
+                        SerializableStepAdvanceCondition::DistanceEntryExit {
+                            distance_to_end_of_step: nested_end,
+                            distance_after_end_step: nested_after,
+                            minimum_horizontal_accuracy: nested_accuracy,
+                            ..
+                        }
+                        | SerializableStepAdvanceCondition::DistanceEntryAndSnappedExit {
+                            distance_to_end_of_step: nested_end,
+                            distance_after_end_step: nested_after,
+                            minimum_horizontal_accuracy: nested_accuracy,
+                            ..
+                        } => {
+                            *nested_end == distance_to_end_of_step
+                                && *nested_after == distance_after_end_step
+                                && *nested_accuracy == minimum_horizontal_accuracy
+                        }
+                        _ => false,
+                    }
+                };
+
+                match (candidate_is_uturn, candidate_successor.as_slice()) {
+                    (None, [])
+                        if !confirmation_active
+                            && movement_anchor.is_none()
+                            && confirmation_count == 0 =>
+                    {
+                        clean()
+                    }
+                    (
+                        Some(false),
+                        [candidate @ SerializableStepAdvanceCondition::DistanceEntryExit { .. }],
+                    ) if required_confirmations > 0
+                        && nested_matches_config(candidate)
+                        && !confirmation_active
+                        && movement_anchor.is_none()
+                        && confirmation_count == 0 =>
+                    {
+                        Arc::new(DistanceEntryAndExitWithUTurnConfirmationCondition {
+                            distance_to_end_of_step,
+                            distance_after_end_of_step: distance_after_end_step,
+                            minimum_horizontal_accuracy,
+                            minimum_significant_movement,
+                            maximum_plausible_speed,
+                            plausibility_distance_allowance,
+                            required_confirmations,
+                            uturn_confirmation_enabled,
+                            candidate_is_uturn: Some(false),
+                            candidate_successor: Some((*candidate).clone().into()),
+                            confirmation_active: false,
+                            movement_anchor: None,
+                            confirmation_count: 0,
+                            last_evaluated_timestamp,
+                        })
+                    }
+                    (
+                        Some(true),
+                        [candidate @ SerializableStepAdvanceCondition::DistanceEntryAndSnappedExit {
+                            ..
+                        }],
+                    ) if uturn_confirmation_enabled
+                        && required_confirmations > 0
+                        && nested_matches_config(candidate)
+                        && ((!confirmation_active
+                            && movement_anchor.is_none()
+                            && confirmation_count == 0)
+                            || (confirmation_active
+                                && ((movement_anchor.is_some()
+                                    && confirmation_count < required_confirmations)
+                                    || (movement_anchor.is_none()
+                                        && confirmation_count == 0)))) =>
+                    {
+                        Arc::new(DistanceEntryAndExitWithUTurnConfirmationCondition {
+                            distance_to_end_of_step,
+                            distance_after_end_of_step: distance_after_end_step,
+                            minimum_horizontal_accuracy,
+                            minimum_significant_movement,
+                            maximum_plausible_speed,
+                            plausibility_distance_allowance,
+                            required_confirmations,
+                            uturn_confirmation_enabled,
+                            candidate_is_uturn: Some(true),
+                            candidate_successor: Some((*candidate).clone().into()),
+                            confirmation_active,
+                            movement_anchor,
+                            confirmation_count,
+                            last_evaluated_timestamp,
+                        })
+                    }
+                    _ => clean(),
+                }
+            }
             SerializableStepAdvanceCondition::OrAdvanceConditions { conditions } => {
                 Arc::new(OrAdvanceConditions {
                     conditions: conditions.into_iter().map(Into::into).collect(),
@@ -311,5 +464,57 @@ pub fn step_advance_distance_entry_and_snapped_exit(
         distance_after_end_of_step,
         minimum_horizontal_accuracy,
         has_reached_end_of_current_step: false,
+    })
+}
+
+#[cfg(feature = "uniffi")]
+#[uniffi::export]
+pub fn step_advance_distance_entry_and_exit_with_uturn_confirmation(
+    distance_to_end_of_step: u16,
+    distance_after_end_of_step: u16,
+    minimum_horizontal_accuracy: u16,
+    minimum_significant_movement: u16,
+    maximum_plausible_speed: u16,
+    plausibility_distance_allowance: u16,
+    required_confirmations: u8,
+    uturn_confirmation_enabled: bool,
+) -> Arc<dyn StepAdvanceCondition> {
+    Arc::new(DistanceEntryAndExitWithUTurnConfirmationCondition {
+        distance_to_end_of_step,
+        distance_after_end_of_step,
+        minimum_horizontal_accuracy,
+        minimum_significant_movement,
+        maximum_plausible_speed,
+        plausibility_distance_allowance,
+        required_confirmations,
+        uturn_confirmation_enabled,
+        candidate_is_uturn: None,
+        candidate_successor: None,
+        confirmation_active: false,
+        movement_anchor: None,
+        confirmation_count: 0,
+        last_evaluated_timestamp: None,
+    })
+}
+
+#[cfg(test)]
+pub(super) fn kan_69_test_condition_with_candidate(
+    candidate_successor: Arc<dyn StepAdvanceCondition>,
+) -> Arc<dyn StepAdvanceCondition> {
+    Arc::new(DistanceEntryAndExitWithUTurnConfirmationCondition {
+        distance_to_end_of_step: 30,
+        distance_after_end_of_step: 5,
+        minimum_horizontal_accuracy: 32,
+        minimum_significant_movement: 5,
+        maximum_plausible_speed: 70,
+        plausibility_distance_allowance: 10,
+        required_confirmations: 2,
+        uturn_confirmation_enabled: false,
+        candidate_is_uturn: Some(false),
+        candidate_successor: Some(candidate_successor),
+        confirmation_active: false,
+        movement_anchor: None,
+        confirmation_count: 0,
+        last_evaluated_timestamp: None,
     })
 }

@@ -540,10 +540,14 @@ impl JsNavigationController {
 
 #[cfg(test)]
 mod tests {
-    use super::step_advance::StepAdvanceCondition;
     use super::*;
+    use crate::models::ManeuverModifier;
     use crate::navigation_controller::step_advance::conditions::{
         DistanceEntryAndExitCondition, DistanceToEndOfStepCondition,
+    };
+    use crate::navigation_controller::step_advance::{
+        SerializableStepAdvanceCondition, StepAdvanceCondition, StepAdvanceResult,
+        kan_69_test_condition_with_candidate,
     };
     use crate::navigation_controller::test_helpers::{
         get_test_navigation_controller_config, nav_controller_insta_settings,
@@ -552,8 +556,377 @@ mod tests {
     use crate::simulation::{
         LocationBias, advance_location_simulation, location_simulation_from_route,
     };
-    use crate::test_utils::{TestRoute, redact_properties};
-    use std::sync::Arc;
+    use crate::test_utils::{TestRoute, make_user_location, redact_properties};
+    use geo::coord;
+    use std::sync::{
+        Arc, Mutex,
+        atomic::{AtomicUsize, Ordering},
+    };
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum RecordingRole {
+        Regular,
+        Arrival,
+    }
+
+    #[derive(Debug, Clone, PartialEq)]
+    enum RecordingEvent {
+        Evaluate {
+            role: RecordingRole,
+            instance_id: usize,
+            user_location: UserLocation,
+            remaining_steps: usize,
+        },
+        NewInstance {
+            role: RecordingRole,
+            from_instance_id: usize,
+            to_instance_id: usize,
+        },
+    }
+
+    #[derive(Clone)]
+    struct RecordingStepCondition {
+        role: RecordingRole,
+        instance_id: usize,
+        next_instance_id: Arc<AtomicUsize>,
+        events: Arc<Mutex<Vec<RecordingEvent>>>,
+        should_advance: bool,
+    }
+
+    impl step_advance::StepAdvanceConditionSerializable for RecordingStepCondition {
+        fn to_js(&self) -> SerializableStepAdvanceCondition {
+            SerializableStepAdvanceCondition::Manual
+        }
+    }
+
+    impl StepAdvanceCondition for RecordingStepCondition {
+        fn should_advance_step(&self, trip_state: TripState) -> StepAdvanceResult {
+            let remaining_steps = match &trip_state {
+                TripState::Navigating {
+                    remaining_steps, ..
+                } => remaining_steps.len(),
+                other => panic!("expected Navigating, got {other:?}"),
+            };
+            self.events.lock().unwrap().push(RecordingEvent::Evaluate {
+                role: self.role,
+                instance_id: self.instance_id,
+                user_location: trip_state.user_location().unwrap(),
+                remaining_steps,
+            });
+            if self.should_advance {
+                StepAdvanceResult::advance_to_new_instance(self)
+            } else {
+                StepAdvanceResult::continue_with_state(self.new_instance())
+            }
+        }
+
+        fn new_instance(&self) -> Arc<dyn StepAdvanceCondition> {
+            let to_instance_id = self.next_instance_id.fetch_add(1, Ordering::SeqCst);
+            self.events
+                .lock()
+                .unwrap()
+                .push(RecordingEvent::NewInstance {
+                    role: self.role,
+                    from_instance_id: self.instance_id,
+                    to_instance_id,
+                });
+            Arc::new(Self {
+                instance_id: to_instance_id,
+                ..self.clone()
+            })
+        }
+    }
+
+    #[derive(Clone)]
+    struct CountingAdvanceCondition {
+        evaluations: Arc<AtomicUsize>,
+    }
+
+    impl step_advance::StepAdvanceConditionSerializable for CountingAdvanceCondition {
+        fn to_js(&self) -> SerializableStepAdvanceCondition {
+            SerializableStepAdvanceCondition::Manual
+        }
+    }
+
+    impl StepAdvanceCondition for CountingAdvanceCondition {
+        fn should_advance_step(&self, _trip_state: TripState) -> StepAdvanceResult {
+            self.evaluations.fetch_add(1, Ordering::SeqCst);
+            StepAdvanceResult::advance_to_new_instance(self)
+        }
+
+        fn new_instance(&self) -> Arc<dyn StepAdvanceCondition> {
+            Arc::new(self.clone())
+        }
+    }
+
+    fn remaining_step_count(state: &NavState) -> usize {
+        match state.trip_state() {
+            TripState::Navigating {
+                remaining_steps, ..
+            } => remaining_steps.len(),
+            other => panic!("expected Navigating, got {other:?}"),
+        }
+    }
+
+    fn assert_regular_cadence_state(
+        state: &NavState,
+        expected_candidate_is_uturn: Option<bool>,
+        expected_candidate_successor: Vec<SerializableStepAdvanceCondition>,
+        expected_timestamp: SystemTime,
+    ) {
+        match state.step_advance_condition().to_js() {
+            SerializableStepAdvanceCondition::DistanceEntryAndExitWithUTurnConfirmation {
+                distance_to_end_of_step,
+                distance_after_end_step,
+                minimum_horizontal_accuracy,
+                minimum_significant_movement,
+                maximum_plausible_speed,
+                plausibility_distance_allowance,
+                required_confirmations,
+                uturn_confirmation_enabled,
+                candidate_is_uturn,
+                candidate_successor,
+                confirmation_active,
+                movement_anchor,
+                confirmation_count,
+                last_evaluated_timestamp,
+            } => {
+                assert_eq!(
+                    (
+                        distance_to_end_of_step,
+                        distance_after_end_step,
+                        minimum_horizontal_accuracy,
+                        minimum_significant_movement,
+                        maximum_plausible_speed,
+                        plausibility_distance_allowance,
+                        required_confirmations,
+                        uturn_confirmation_enabled,
+                    ),
+                    (30, 5, 32, 5, 70, 10, 2, false),
+                );
+                assert_eq!(candidate_is_uturn, expected_candidate_is_uturn);
+                assert_eq!(
+                    serde_json::to_value(candidate_successor).unwrap(),
+                    serde_json::to_value(expected_candidate_successor).unwrap(),
+                );
+                assert!(!confirmation_active);
+                assert_eq!(movement_anchor, None);
+                assert_eq!(confirmation_count, 0);
+                assert_eq!(last_evaluated_timestamp, Some(expected_timestamp));
+            }
+            other => panic!("expected KAN-69 wrapper, got {other:?}"),
+        }
+    }
+
+    fn assert_current_instruction_is_not_uturn(state: &NavState) {
+        match state.trip_state() {
+            TripState::Navigating {
+                visual_instruction, ..
+            } => assert!(!matches!(
+                visual_instruction
+                    .as_ref()
+                    .and_then(|instruction| { instruction.primary_content.maneuver_modifier }),
+                Some(ManeuverModifier::UTurn),
+            )),
+            other => panic!("expected Navigating, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn kan_69_disabled_confirmation_four_to_three_same_fix_is_suppressed() {
+        let mut route = TestRoute::Valhalla.first_route();
+        assert_eq!(route.steps.len(), 23);
+        let selected_steps = route.steps[5..9].to_vec();
+        assert_eq!(
+            selected_steps
+                .iter()
+                .map(|step| step.distance)
+                .collect::<Vec<_>>(),
+            vec![7.0, 70.0, 46.0, 131.0],
+        );
+        let start = selected_steps[0].geometry[0];
+        route.steps = selected_steps;
+        assert_eq!(route.steps.len(), 4);
+
+        let mut submitted_fix = make_user_location(coord!(x: start.lng, y: start.lat), 5.0);
+        submitted_fix.timestamp = UNIX_EPOCH + Duration::from_secs(1_785_319_200);
+        let evaluations = Arc::new(AtomicUsize::new(0));
+        let regular = kan_69_test_condition_with_candidate(Arc::new(CountingAdvanceCondition {
+            evaluations: Arc::clone(&evaluations),
+        }));
+        let controller =
+            create_navigator(route, get_test_navigation_controller_config(regular), false);
+        let state = controller.get_initial_state(submitted_fix);
+        assert_eq!(remaining_step_count(&state), 4);
+        assert_current_instruction_is_not_uturn(&state);
+
+        let after_same_fix = controller.update_user_location(submitted_fix, state);
+        assert_eq!(remaining_step_count(&after_same_fix), 3);
+        assert_eq!(evaluations.load(Ordering::SeqCst), 1);
+        assert_regular_cadence_state(&after_same_fix, None, vec![], submitted_fix.timestamp);
+        assert_current_instruction_is_not_uturn(&after_same_fix);
+
+        let (next_start, next_distance) = match after_same_fix.trip_state() {
+            TripState::Navigating {
+                remaining_steps, ..
+            } => (remaining_steps[0].geometry[0], remaining_steps[0].distance),
+            other => panic!("expected Navigating, got {other:?}"),
+        };
+        assert_eq!(next_distance, 70.0);
+        let mut distinct_fix =
+            make_user_location(coord!(x: next_start.lng, y: next_start.lat), 5.0);
+        distinct_fix.timestamp = submitted_fix.timestamp + Duration::from_secs(1);
+        let after_distinct = controller.update_user_location(distinct_fix, after_same_fix);
+
+        assert_eq!(remaining_step_count(&after_distinct), 3);
+        assert_eq!(evaluations.load(Ordering::SeqCst), 1);
+        assert_regular_cadence_state(
+            &after_distinct,
+            Some(false),
+            vec![SerializableStepAdvanceCondition::DistanceEntryExit {
+                distance_to_end_of_step: 30,
+                distance_after_end_step: 5,
+                minimum_horizontal_accuracy: 32,
+                has_reached_end_of_current_step: false,
+            }],
+            distinct_fix.timestamp,
+        );
+    }
+
+    fn recording_condition(
+        role: RecordingRole,
+        should_advance: bool,
+        next_instance_id: Arc<AtomicUsize>,
+        events: Arc<Mutex<Vec<RecordingEvent>>>,
+    ) -> Arc<dyn StepAdvanceCondition> {
+        Arc::new(RecordingStepCondition {
+            role,
+            instance_id: next_instance_id.fetch_add(1, Ordering::SeqCst),
+            next_instance_id,
+            events,
+            should_advance,
+        })
+    }
+
+    fn run_regular_to_arrival_cadence(
+        arrival_should_advance: bool,
+    ) -> (Vec<RecordingEvent>, NavState, UserLocation) {
+        let mut route = TestRoute::Valhalla.first_route();
+        let start = route.geometry[0];
+        assert_eq!(route.steps.len(), 23);
+        assert_eq!((start.lat, start.lng), (59.442643, 24.765368));
+        route.steps.truncate(3);
+        assert_eq!(route.steps.len(), 3);
+        let mut submitted_fix = make_user_location(coord!(x: start.lng, y: start.lat), 5.0);
+        submitted_fix.timestamp = UNIX_EPOCH + Duration::from_secs(1_785_319_200);
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let next_instance_id = Arc::new(AtomicUsize::new(1));
+        let regular = recording_condition(
+            RecordingRole::Regular,
+            true,
+            Arc::clone(&next_instance_id),
+            Arc::clone(&events),
+        );
+        let arrival = recording_condition(
+            RecordingRole::Arrival,
+            arrival_should_advance,
+            Arc::clone(&next_instance_id),
+            Arc::clone(&events),
+        );
+        let mut config = get_test_navigation_controller_config(regular);
+        config.arrival_step_advance_condition = arrival;
+        let controller = create_navigator(route, config, false);
+        let state = controller.get_initial_state(submitted_fix);
+        assert_eq!(remaining_step_count(&state), 3);
+        events.lock().unwrap().clear();
+
+        let final_state = controller.update_user_location(submitted_fix, state);
+        let recorded = events.lock().unwrap().clone();
+        (recorded, final_state, submitted_fix)
+    }
+
+    fn evaluation(event: &RecordingEvent) -> (RecordingRole, usize, UserLocation, usize) {
+        match event {
+            RecordingEvent::Evaluate {
+                role,
+                instance_id,
+                user_location,
+                remaining_steps,
+            } => (*role, *instance_id, *user_location, *remaining_steps),
+            other => panic!("expected Evaluate, got {other:?}"),
+        }
+    }
+
+    fn reset(event: &RecordingEvent) -> (RecordingRole, usize, usize) {
+        match event {
+            RecordingEvent::NewInstance {
+                role,
+                from_instance_id,
+                to_instance_id,
+            } => (*role, *from_instance_id, *to_instance_id),
+            other => panic!("expected NewInstance, got {other:?}"),
+        }
+    }
+
+    fn assert_same_fix_event_order(
+        events: &[RecordingEvent],
+        submitted_fix: UserLocation,
+        arrival_advances: bool,
+    ) {
+        assert_eq!(events.len(), if arrival_advances { 6 } else { 5 });
+        let (regular_role, regular_0, regular_fix, regular_steps) = evaluation(&events[0]);
+        let (regular_reset_role_1, regular_from_0, regular_1) = reset(&events[1]);
+        let (regular_reset_role_2, regular_from_1, regular_2) = reset(&events[2]);
+        let (arrival_role, arrival_0, arrival_fix, arrival_steps) = evaluation(&events[3]);
+        let (arrival_reset_role_1, arrival_from_0, arrival_1) = reset(&events[4]);
+
+        assert_eq!(regular_role, RecordingRole::Regular);
+        assert_eq!(regular_reset_role_1, RecordingRole::Regular);
+        assert_eq!(regular_reset_role_2, RecordingRole::Regular);
+        assert_eq!(arrival_role, RecordingRole::Arrival);
+        assert_eq!(arrival_reset_role_1, RecordingRole::Arrival);
+        assert_eq!(regular_fix, submitted_fix);
+        assert_eq!(arrival_fix, submitted_fix);
+        assert_eq!((regular_steps, arrival_steps), (3, 2));
+        assert_eq!((regular_0, regular_1, regular_2), (1, 3, 4));
+        assert_eq!((arrival_0, arrival_1), (2, 5));
+        assert_eq!(regular_0, regular_from_0);
+        assert_eq!(regular_1, regular_from_1);
+        assert_ne!(regular_0, regular_1);
+        assert_ne!(regular_1, regular_2);
+        assert_eq!(arrival_0, arrival_from_0);
+        assert_ne!(arrival_0, arrival_1);
+        assert_ne!(regular_0, arrival_0);
+        assert!(!events.iter().skip(3).any(|event| matches!(
+            event,
+            RecordingEvent::Evaluate {
+                role: RecordingRole::Regular,
+                ..
+            }
+        )));
+
+        if arrival_advances {
+            let (role, from, to) = reset(&events[5]);
+            assert_eq!(role, RecordingRole::Arrival);
+            assert_eq!(from, arrival_1);
+            assert_eq!(to, 6);
+        }
+    }
+
+    #[test]
+    fn kan_69_regular_to_arrival_same_fix_cadence_arrival_holds() {
+        let (events, final_state, submitted_fix) = run_regular_to_arrival_cadence(false);
+        assert_eq!(remaining_step_count(&final_state), 2);
+        assert_same_fix_event_order(&events, submitted_fix, false);
+    }
+
+    #[test]
+    fn kan_69_regular_to_arrival_same_fix_cadence_arrival_advances() {
+        let (events, final_state, submitted_fix) = run_regular_to_arrival_cadence(true);
+        assert_eq!(remaining_step_count(&final_state), 1);
+        assert_same_fix_event_order(&events, submitted_fix, true);
+    }
 
     fn test_full_route_state_snapshot(
         route: Route,

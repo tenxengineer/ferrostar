@@ -29,9 +29,14 @@ ext {
     SKIP_SIGNING_PROPERTY = "skip.signing"
 }
 
+def uzMapMavenRepository = providers.gradleProperty("uzMapMavenRepository")
+    .orElse(rootProject.layout.buildDirectory.dir("uzmap-m2").map {
+        it.asFile.absolutePath
+    })
+
 allprojects {
-    group = "com.stadiamaps.ferrostar"
-    version = "0.53.0"
+    group = "uz.uzmap.ferrostar"
+    version = "0.53.0-uzmap.1"
 }
 
 // ktfmt-gradle 0.26 gates its Android source-set discovery on the `kotlin-android` plugin
@@ -41,6 +46,13 @@ allprojects {
 // and silently no-op.
 // Until ktfmt-gradle ships AGP-9-aware discovery, wire the tasks ourselves.
 subprojects { sp ->
+    sp.plugins.withId("com.vanniktech.maven.publish") {
+        sp.publishing.repositories.maven {
+            name = "uzMap"
+            url = sp.uri(uzMapMavenRepository.get())
+        }
+    }
+
     sp.plugins.withId('com.ncorti.ktfmt.gradle') {
         def ktSources = sp.fileTree('src') {
             include '**/*.kt'

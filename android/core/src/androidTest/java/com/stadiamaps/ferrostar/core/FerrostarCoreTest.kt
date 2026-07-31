@@ -16,6 +16,7 @@ import okhttp3.mock.respond
 import okhttp3.mock.rule
 import okhttp3.mock.url
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.fail
 import org.junit.Test
 import uniffi.ferrostar.BoundingBox
@@ -44,7 +45,9 @@ import uniffi.ferrostar.VisualInstructionContent
 import uniffi.ferrostar.Waypoint
 import uniffi.ferrostar.WaypointAdvanceMode
 import uniffi.ferrostar.WaypointKind
+import uniffi.ferrostar.createNavigationSession
 import uniffi.ferrostar.stepAdvanceDistanceFromStep
+import uniffi.ferrostar.stepAdvanceDistanceEntryAndExitWithUturnConfirmation
 import uniffi.ferrostar.stepAdvanceDistanceToEndOfStep
 import uniffi.ferrostar.stepAdvanceManual
 
@@ -144,6 +147,40 @@ class FerrostarCoreTest {
                   ),
               ),
       )
+
+  @Test
+  fun kan69GeneratedFactoryEvaluatesThroughKotlinBinding() {
+    val condition =
+        stepAdvanceDistanceEntryAndExitWithUturnConfirmation(
+            distanceToEndOfStep = 30u,
+            distanceAfterEndOfStep = 5u,
+            minimumHorizontalAccuracy = 32u,
+            minimumSignificantMovement = 5u,
+            maximumPlausibleSpeed = 70u,
+            plausibilityDistanceAllowance = 10u,
+            requiredConfirmations = 2u,
+            uturnConfirmationEnabled = true,
+        )
+    val config =
+        NavigationControllerConfig(
+            WaypointAdvanceMode.WaypointWithinRange(100.0),
+            condition,
+            stepAdvanceManual(),
+            RouteDeviationTracking.None,
+            CourseFiltering.RAW,
+        )
+    val session = createNavigationSession(mockRoute, config, emptyList())
+    val location =
+        UserLocation(
+            mockRoute.geometry.first(),
+            5.0,
+            null,
+            Instant.EPOCH,
+            null,
+        )
+    val result = condition.shouldAdvanceStep(session.getInitialState(location).tripState)
+    assertFalse(result.shouldAdvance)
+  }
 
   @Test
   fun test401UnauthorizedRouteResponse() = runTest {
