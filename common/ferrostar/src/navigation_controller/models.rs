@@ -2,6 +2,7 @@
 
 use super::step_advance::conditions::ManualStepCondition;
 use super::step_advance::{SerializableStepAdvanceCondition, StepAdvanceCondition};
+use super::uzmatch::{UzmatchConfig, UzmatchSnapshot, UzmatchState};
 use crate::algorithms::distance_between_locations;
 use crate::deviation_detection::{RouteDeviation, RouteDeviationTracking};
 use crate::models::{RouteStep, SpokenInstruction, UserLocation, VisualInstruction, Waypoint};
@@ -26,6 +27,9 @@ pub struct NavState {
     trip_state: TripState,
     // This has to be here because we actually do need to update the internal state that changes throughout navigation.
     step_advance_condition: Arc<dyn StepAdvanceCondition>,
+    // Internal UzNav matching core state (standing, location class, speed
+    // filter, route position). Packed here to keep the controller pure.
+    uzmatch_state: UzmatchState,
 }
 
 impl NavState {
@@ -33,10 +37,12 @@ impl NavState {
     pub fn new(
         trip_state: TripState,
         step_advance_condition: Arc<dyn StepAdvanceCondition>,
+        uzmatch_state: UzmatchState,
     ) -> Self {
         Self {
             trip_state,
             step_advance_condition,
+            uzmatch_state,
         }
     }
 
@@ -45,6 +51,7 @@ impl NavState {
         Self {
             trip_state: TripState::Idle { user_location },
             step_advance_condition: Arc::new(ManualStepCondition {}), // No op condition.
+            uzmatch_state: UzmatchState::default(),
         }
     }
 
@@ -61,6 +68,7 @@ impl NavState {
                 },
             },
             step_advance_condition: Arc::new(ManualStepCondition {}), // No op condition.
+            uzmatch_state: UzmatchState::default(),
         }
     }
 
@@ -73,6 +81,11 @@ impl NavState {
     pub fn step_advance_condition(&self) -> Arc<dyn StepAdvanceCondition> {
         self.step_advance_condition.clone()
     }
+
+    #[inline]
+    pub fn uzmatch_state(&self) -> UzmatchState {
+        self.uzmatch_state.clone()
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -84,6 +97,8 @@ pub struct SerializableNavState {
     pub(crate) trip_state: TripState,
     // This has to be here because we actually do need to update the internal state that changes throughout navigation.
     pub(crate) step_advance_condition: SerializableStepAdvanceCondition,
+    #[serde(default)]
+    pub(crate) uzmatch_state: UzmatchState,
 }
 
 impl From<SerializableNavState> for NavState {
@@ -91,6 +106,7 @@ impl From<SerializableNavState> for NavState {
         Self {
             trip_state: value.trip_state,
             step_advance_condition: value.step_advance_condition.into(),
+            uzmatch_state: value.uzmatch_state,
         }
     }
 }
@@ -100,6 +116,7 @@ impl From<NavState> for SerializableNavState {
         Self {
             trip_state: value.trip_state,
             step_advance_condition: value.step_advance_condition.to_js(),
+            uzmatch_state: value.uzmatch_state,
         }
     }
 }
@@ -229,6 +246,11 @@ pub enum TripState {
         /// Annotation data at the current location.
         /// This is represented as a json formatted byte array to allow for flexible encoding of custom annotations.
         annotation_json: Option<String>,
+        /// UzNav matching core snapshot (route position, standing, location
+        /// class, filtered speed). `None` unless
+        /// [`NavigationControllerConfig::uzmatch`] is enabled.
+        #[serde(default)]
+        uzmatch: Option<UzmatchSnapshot>,
     },
     /// The navigation controller has reached the end of the trip.
     Complete {
@@ -364,6 +386,10 @@ pub struct NavigationControllerConfig {
     pub route_deviation_tracking: RouteDeviationTracking,
     /// Configures how the heading component of the snapped location is reported in [`TripState`].
     pub snapped_location_course_filtering: CourseFiltering,
+    /// UzNav matching core configuration (standing detection, heading-aware
+    /// snap, location classification, speed filtering). Disabled by default,
+    /// preserving upstream behavior.
+    pub uzmatch: UzmatchConfig,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -388,6 +414,9 @@ pub struct SerializableNavigationControllerConfig {
     pub route_deviation_tracking: RouteDeviationTracking,
     /// Configures how the heading component of the snapped location is reported in [`TripState`].
     pub snapped_location_course_filtering: CourseFiltering,
+    /// UzNav matching core configuration.
+    #[serde(default)]
+    pub uzmatch: UzmatchConfig,
 }
 
 impl From<SerializableNavigationControllerConfig> for NavigationControllerConfig {
@@ -398,6 +427,7 @@ impl From<SerializableNavigationControllerConfig> for NavigationControllerConfig
             arrival_step_advance_condition: js_config.arrival_step_advance_condition.into(),
             route_deviation_tracking: js_config.route_deviation_tracking,
             snapped_location_course_filtering: js_config.snapped_location_course_filtering,
+            uzmatch: js_config.uzmatch,
         }
     }
 }
@@ -410,6 +440,7 @@ impl From<NavigationControllerConfig> for SerializableNavigationControllerConfig
             arrival_step_advance_condition: config.arrival_step_advance_condition.to_js(),
             route_deviation_tracking: config.route_deviation_tracking,
             snapped_location_course_filtering: config.snapped_location_course_filtering,
+            uzmatch: config.uzmatch,
         }
     }
 }

@@ -11,6 +11,7 @@ use crate::navigation_controller::models::{
 };
 use crate::navigation_controller::step_advance::StepAdvanceCondition;
 use crate::navigation_controller::step_advance::conditions::DistanceToEndOfStepCondition;
+use crate::navigation_controller::uzmatch::UzmatchConfig;
 #[cfg(feature = "alloc")]
 use alloc::string::ToString;
 use chrono::{DateTime, Utc};
@@ -30,6 +31,7 @@ pub fn get_test_navigation_controller_config(
             max_acceptable_deviation: 0.0,
         },
         snapped_location_course_filtering: CourseFiltering::Raw,
+        uzmatch: UzmatchConfig::default(),
         step_advance_condition,
         arrival_step_advance_condition: Arc::new(DistanceToEndOfStepCondition {
             distance: 5,
@@ -289,5 +291,6 @@ pub fn get_navigating_trip_state(
         visual_instruction: None,
         spoken_instruction: None,
         annotation_json: None,
+        uzmatch: None,
     }
 }

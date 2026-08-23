@@ -6,6 +6,7 @@ use ferrostar::navigation_controller::create_navigator;
 use ferrostar::navigation_controller::models::{
     CourseFiltering, NavigationControllerConfig, TripState, WaypointAdvanceMode,
 };
+use ferrostar::navigation_controller::uzmatch::UzmatchConfig;
 use ferrostar::navigation_controller::step_advance::conditions::{
     DistanceToEndOfStepCondition, ManualStepCondition,
 };
@@ -106,6 +107,7 @@ fn same_location_results_in_identical_state() {
             }),
             route_deviation_tracking: RouteDeviationTracking::None,
             snapped_location_course_filtering: CourseFiltering::Raw,
+            uzmatch: UzmatchConfig::default(),
         },
         false,
     );
@@ -152,6 +154,7 @@ fn simple_route_state_machine_manual_advance() {
             arrival_step_advance_condition: Arc::new(ManualStepCondition),
             route_deviation_tracking: RouteDeviationTracking::None,
             snapped_location_course_filtering: CourseFiltering::Raw,
+            uzmatch: UzmatchConfig::default(),
         },
         false,
     );
@@ -234,6 +237,7 @@ fn simple_route_state_machine_advances_with_location_change() {
             }),
             route_deviation_tracking: RouteDeviationTracking::None,
             snapped_location_course_filtering: CourseFiltering::Raw,
+            uzmatch: UzmatchConfig::default(),
         },
         false,
     );

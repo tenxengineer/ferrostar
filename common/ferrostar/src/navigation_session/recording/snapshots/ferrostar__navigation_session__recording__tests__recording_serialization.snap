@@ -1,5 +1,6 @@
 ---
 source: ferrostar/src/navigation_session/recording/mod.rs
+assertion_line: 113
 expression: value
 ---
 config:
@@ -16,6 +17,15 @@ config:
     DistanceToEndOfStep:
       distance: 0
       minimum_horizontal_accuracy: 0
+  uzmatch:
+    enabled: false
+    fine_accuracy_threshold_m: 25
+    snap_heading_min_speed_mps: 4
+    snap_heading_stddev_deg: 6
+    snap_position_stddev_m: 8
+    standing_detection_period_ms: 7000
+    standing_signal_expiry_ms: 5000
+    standing_speed_threshold_mps: 0.5
   waypoint_advance:
     WaypointWithinRange: 100
 events:
@@ -206,6 +216,7 @@ events:
                 degrees: 225
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -395,6 +406,7 @@ events:
                 degrees: 225
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -584,6 +596,7 @@ events:
                 degrees: 225
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -773,6 +786,7 @@ events:
                 degrees: 225
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -962,6 +976,7 @@ events:
                 degrees: 224
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -1151,6 +1166,7 @@ events:
                 degrees: 225
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -1340,6 +1356,7 @@ events:
                 degrees: 225
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -1529,6 +1546,7 @@ events:
                 degrees: 225
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -1718,6 +1736,7 @@ events:
                 degrees: 225
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -1907,6 +1926,7 @@ events:
                 degrees: 225
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -2096,6 +2116,7 @@ events:
                 degrees: 225
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -2285,6 +2306,7 @@ events:
                 degrees: 225
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -2474,6 +2496,7 @@ events:
                 degrees: 225
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -2663,6 +2686,7 @@ events:
                 degrees: 225
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -2852,6 +2876,7 @@ events:
                 degrees: 225
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -3041,6 +3066,7 @@ events:
                 degrees: 225
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -3230,6 +3256,7 @@ events:
                 degrees: 225
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -3419,6 +3446,7 @@ events:
                 degrees: 225
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -3608,6 +3636,7 @@ events:
                 degrees: 225
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -3797,6 +3826,7 @@ events:
                 degrees: 225
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -3986,6 +4016,7 @@ events:
                 degrees: 225
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -4175,6 +4206,7 @@ events:
                 degrees: 225
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -4364,6 +4396,7 @@ events:
                 degrees: 225
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -4553,6 +4586,7 @@ events:
                 degrees: 225
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -4742,6 +4776,7 @@ events:
                 degrees: 225
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -4931,6 +4966,7 @@ events:
                 degrees: 225
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -5098,6 +5134,7 @@ events:
                 degrees: 235
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -5265,6 +5302,7 @@ events:
                 degrees: 234
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -5432,6 +5470,7 @@ events:
                 degrees: 235
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -5599,6 +5638,7 @@ events:
                 degrees: 235
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -5766,6 +5806,7 @@ events:
                 degrees: 234
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -5933,6 +5974,7 @@ events:
                 degrees: 235
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -6100,6 +6142,7 @@ events:
                 degrees: 234
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -6267,6 +6310,7 @@ events:
                 degrees: 235
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -6434,6 +6478,7 @@ events:
                 degrees: 235
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -6601,6 +6646,7 @@ events:
                 degrees: 234
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -6768,6 +6814,7 @@ events:
                 degrees: 235
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -6935,6 +6982,7 @@ events:
                 degrees: 246
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -7102,6 +7150,7 @@ events:
                 degrees: 245
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -7269,6 +7318,7 @@ events:
                 degrees: 254
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -7436,6 +7486,7 @@ events:
                 degrees: 253
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -7603,6 +7654,7 @@ events:
                 degrees: 264
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -7770,6 +7822,7 @@ events:
                 degrees: 275
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -7937,6 +7990,7 @@ events:
                 degrees: 280
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -8104,6 +8158,7 @@ events:
                 degrees: 291
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -8271,6 +8326,7 @@ events:
                 degrees: 300
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -8438,6 +8494,7 @@ events:
                 degrees: 303
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -8605,6 +8662,7 @@ events:
                 degrees: 312
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -8772,6 +8830,7 @@ events:
                 degrees: 326
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -8939,6 +8998,7 @@ events:
                 degrees: 328
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -9106,6 +9166,7 @@ events:
                 degrees: 337
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -9273,6 +9334,7 @@ events:
                 degrees: 348
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -9440,6 +9502,7 @@ events:
                 degrees: 347
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -9607,6 +9670,7 @@ events:
                 degrees: 346
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -9774,6 +9838,7 @@ events:
                 degrees: 347
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -9941,6 +10006,7 @@ events:
                 degrees: 19
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -10108,6 +10174,7 @@ events:
                 degrees: 20
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -10275,6 +10342,7 @@ events:
                 degrees: 31
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -10442,6 +10510,7 @@ events:
                 degrees: 42
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -10609,6 +10678,7 @@ events:
                 degrees: 42
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -10776,6 +10846,7 @@ events:
                 degrees: 51
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -10943,6 +11014,7 @@ events:
                 degrees: 61
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -11110,6 +11182,7 @@ events:
                 degrees: 62
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -11277,6 +11350,7 @@ events:
                 degrees: 72
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -11444,6 +11518,7 @@ events:
                 degrees: 72
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -11554,6 +11629,7 @@ events:
                 degrees: 115
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -11664,6 +11740,7 @@ events:
                 degrees: 115
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -11774,6 +11851,7 @@ events:
                 degrees: 113
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -11884,6 +11962,7 @@ events:
                 degrees: 114
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -11994,6 +12073,7 @@ events:
                 degrees: 127
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -12104,6 +12184,7 @@ events:
                 degrees: 127
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -12214,6 +12295,7 @@ events:
                 degrees: 134
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -12324,6 +12406,7 @@ events:
                 degrees: 142
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -12434,6 +12517,7 @@ events:
                 degrees: 141
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -12544,6 +12628,7 @@ events:
                 degrees: 142
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -12654,6 +12739,7 @@ events:
                 degrees: 164
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -12764,6 +12850,7 @@ events:
                 degrees: 164
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -12874,6 +12961,7 @@ events:
                 degrees: 165
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -12984,6 +13072,7 @@ events:
                 degrees: 164
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -13094,6 +13183,7 @@ events:
                 degrees: 164
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -13204,6 +13294,7 @@ events:
                 degrees: 164
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -13314,6 +13405,7 @@ events:
                 degrees: 164
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -13424,6 +13516,7 @@ events:
                 degrees: 164
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -13534,6 +13627,7 @@ events:
                 degrees: 164
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -13644,6 +13738,7 @@ events:
                 degrees: 164
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -13754,6 +13849,7 @@ events:
                 degrees: 164
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -13864,6 +13960,7 @@ events:
                 degrees: 163
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -13974,6 +14071,7 @@ events:
                 degrees: 164
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -14084,6 +14182,7 @@ events:
                 degrees: 163
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -14194,6 +14293,7 @@ events:
                 degrees: 164
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -14304,6 +14404,7 @@ events:
                 degrees: 166
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -14414,6 +14515,7 @@ events:
                 degrees: 166
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -14524,6 +14626,7 @@ events:
                 degrees: 165
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -14634,6 +14737,7 @@ events:
                 degrees: 166
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -14744,6 +14848,7 @@ events:
                 degrees: 166
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -14854,6 +14959,7 @@ events:
                 degrees: 166
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -14964,6 +15070,7 @@ events:
                 degrees: 165
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -15074,6 +15181,7 @@ events:
                 degrees: 164
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -15184,6 +15292,7 @@ events:
                 degrees: 164
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -15294,6 +15403,7 @@ events:
                 degrees: 164
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -15404,6 +15514,7 @@ events:
                 degrees: 164
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -15514,6 +15625,7 @@ events:
                 degrees: 164
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -15624,6 +15736,7 @@ events:
                 degrees: 164
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -15734,6 +15847,7 @@ events:
                 degrees: 164
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -15844,6 +15958,7 @@ events:
                 degrees: 164
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -15954,6 +16069,7 @@ events:
                 degrees: 164
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -16064,6 +16180,7 @@ events:
                 degrees: 166
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -16174,6 +16291,7 @@ events:
                 degrees: 167
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -16284,6 +16402,7 @@ events:
                 degrees: 166
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -16394,6 +16513,7 @@ events:
                 degrees: 167
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -16504,6 +16624,7 @@ events:
                 degrees: 166
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -16614,6 +16735,7 @@ events:
                 degrees: 166
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -16724,6 +16846,7 @@ events:
                 degrees: 165
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -16834,6 +16957,7 @@ events:
                 degrees: 166
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -16944,6 +17068,7 @@ events:
                 degrees: 166
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -17054,6 +17179,7 @@ events:
                 degrees: 166
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -17164,6 +17290,7 @@ events:
                 degrees: 166
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -17274,6 +17401,7 @@ events:
                 degrees: 166
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -17384,6 +17512,7 @@ events:
                 degrees: 166
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -17494,6 +17623,7 @@ events:
                 degrees: 166
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -17604,6 +17734,7 @@ events:
                 degrees: 166
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -17714,6 +17845,7 @@ events:
                 degrees: 167
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -17824,6 +17956,7 @@ events:
                 degrees: 166
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:
@@ -17888,6 +18021,7 @@ events:
                 degrees: 180
               horizontal_accuracy: 0
               speed: ~
+            uzmatch: ~
             visual_instruction: ~
     timestamp: "[timestamp]"
   - event_data:

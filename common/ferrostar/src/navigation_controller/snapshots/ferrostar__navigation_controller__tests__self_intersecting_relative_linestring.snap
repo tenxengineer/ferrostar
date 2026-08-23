@@ -1,5 +1,6 @@
 ---
 source: ferrostar/src/navigation_controller/mod.rs
+assertion_line: 1122
 expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>>()"
 ---
 - Navigating:
@@ -183,6 +184,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 0
     user_location:
@@ -364,6 +366,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 1
     user_location:
@@ -545,6 +548,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 1
     user_location:
@@ -726,6 +730,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 1
     user_location:
@@ -907,6 +912,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 1
     user_location:
@@ -1088,6 +1094,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 1
     user_location:
@@ -1269,6 +1276,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 1
     user_location:
@@ -1450,6 +1458,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 2
     user_location:
@@ -1631,6 +1640,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 2
     user_location:
@@ -1812,6 +1822,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 2
     user_location:
@@ -1993,6 +2004,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 2
     user_location:
@@ -2174,6 +2186,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 2
     user_location:
@@ -2355,6 +2368,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 2
     user_location:
@@ -2536,6 +2550,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 2
     user_location:
@@ -2717,6 +2732,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 2
     user_location:
@@ -2898,6 +2914,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 2
     user_location:
@@ -3079,6 +3096,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 2
     user_location:
@@ -3260,6 +3278,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 3
     user_location:
@@ -3441,6 +3460,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 3
     user_location:
@@ -3622,6 +3642,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 3
     user_location:
@@ -3803,6 +3824,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 3
     user_location:
@@ -3984,6 +4006,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 3
     user_location:
@@ -4165,6 +4188,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 3
     user_location:
@@ -4346,6 +4370,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 3
     user_location:
@@ -4527,6 +4552,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 3
     user_location:
@@ -4708,6 +4734,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 3
     user_location:
@@ -4889,6 +4916,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 0
     user_location:
@@ -5048,6 +5076,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 0
     user_location:
@@ -5207,6 +5236,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 0
     user_location:
@@ -5366,6 +5396,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 0
     user_location:
@@ -5525,6 +5556,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 0
     user_location:
@@ -5684,6 +5716,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 0
     user_location:
@@ -5843,6 +5876,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 0
     user_location:
@@ -6002,6 +6036,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 0
     user_location:
@@ -6161,6 +6196,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 0
     user_location:
@@ -6320,6 +6356,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 0
     user_location:
@@ -6479,6 +6516,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 0
     user_location:
@@ -6638,6 +6676,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 1
     user_location:
@@ -6797,6 +6836,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 1
     user_location:
@@ -6956,6 +6996,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 2
     user_location:
@@ -7115,6 +7156,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 2
     user_location:
@@ -7274,6 +7316,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 3
     user_location:
@@ -7433,6 +7476,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 4
     user_location:
@@ -7592,6 +7636,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 5
     user_location:
@@ -7751,6 +7796,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 6
     user_location:
@@ -7910,6 +7956,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 7
     user_location:
@@ -8069,6 +8116,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 8
     user_location:
@@ -8228,6 +8276,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 9
     user_location:
@@ -8387,6 +8436,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 10
     user_location:
@@ -8546,6 +8596,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 11
     user_location:
@@ -8705,6 +8756,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 12
     user_location:
@@ -8864,6 +8916,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 13
     user_location:
@@ -9023,6 +9076,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 14
     user_location:
@@ -9182,6 +9236,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 14
     user_location:
@@ -9341,6 +9396,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 14
     user_location:
@@ -9500,6 +9556,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 15
     user_location:
@@ -9659,6 +9716,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 15
     user_location:
@@ -9818,6 +9876,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 16
     user_location:
@@ -9977,6 +10036,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 17
     user_location:
@@ -10136,6 +10196,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 17
     user_location:
@@ -10295,6 +10356,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 18
     user_location:
@@ -10454,6 +10516,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 19
     user_location:
@@ -10613,6 +10676,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 19
     user_location:
@@ -10772,6 +10836,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 20
     user_location:
@@ -10931,6 +10996,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 20
     user_location:
@@ -11090,6 +11156,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 0
     user_location:
@@ -11192,6 +11259,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 0
     user_location:
@@ -11294,6 +11362,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 1
     user_location:
@@ -11396,6 +11465,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 1
     user_location:
@@ -11498,6 +11568,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 2
     user_location:
@@ -11600,6 +11671,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 2
     user_location:
@@ -11702,6 +11774,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 3
     user_location:
@@ -11804,6 +11877,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 4
     user_location:
@@ -11906,6 +11980,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 4
     user_location:
@@ -12008,6 +12083,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 4
     user_location:
@@ -12110,6 +12186,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 5
     user_location:
@@ -12212,6 +12289,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 5
     user_location:
@@ -12314,6 +12392,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 5
     user_location:
@@ -12416,6 +12495,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 5
     user_location:
@@ -12518,6 +12598,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 6
     user_location:
@@ -12620,6 +12701,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 6
     user_location:
@@ -12722,6 +12804,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 6
     user_location:
@@ -12824,6 +12907,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 6
     user_location:
@@ -12926,6 +13010,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 6
     user_location:
@@ -13028,6 +13113,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 6
     user_location:
@@ -13130,6 +13216,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 7
     user_location:
@@ -13232,6 +13319,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 7
     user_location:
@@ -13334,6 +13422,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 7
     user_location:
@@ -13436,6 +13525,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 7
     user_location:
@@ -13538,6 +13628,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 7
     user_location:
@@ -13640,6 +13731,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 8
     user_location:
@@ -13742,6 +13834,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 8
     user_location:
@@ -13844,6 +13937,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 8
     user_location:
@@ -13946,6 +14040,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 8
     user_location:
@@ -14048,6 +14143,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 8
     user_location:
@@ -14150,6 +14246,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 8
     user_location:
@@ -14252,6 +14349,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 9
     user_location:
@@ -14354,6 +14452,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 10
     user_location:
@@ -14456,6 +14555,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 10
     user_location:
@@ -14558,6 +14658,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 10
     user_location:
@@ -14660,6 +14761,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 10
     user_location:
@@ -14762,6 +14864,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 10
     user_location:
@@ -14864,6 +14967,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 11
     user_location:
@@ -14966,6 +15070,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 11
     user_location:
@@ -15068,6 +15173,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 11
     user_location:
@@ -15170,6 +15276,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 11
     user_location:
@@ -15272,6 +15379,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 12
     user_location:
@@ -15374,6 +15482,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 12
     user_location:
@@ -15476,6 +15585,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 12
     user_location:
@@ -15578,6 +15688,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 12
     user_location:
@@ -15680,6 +15791,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 12
     user_location:
@@ -15782,6 +15894,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 13
     user_location:
@@ -15884,6 +15997,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 13
     user_location:
@@ -15986,6 +16100,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 13
     user_location:
@@ -16088,6 +16203,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 13
     user_location:
@@ -16190,6 +16306,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 14
     user_location:
@@ -16292,6 +16409,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 14
     user_location:
@@ -16394,6 +16512,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 14
     user_location:
@@ -16496,6 +16615,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 14
     user_location:
@@ -16598,6 +16718,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 15
     user_location:
@@ -16700,6 +16821,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 15
     user_location:
@@ -16802,6 +16924,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 15
     user_location:
@@ -16904,6 +17027,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Navigating:
     current_step_geometry_index: 0
     user_location:
@@ -16960,6 +17084,7 @@ expression: "states.into_iter().map(|state| state.trip_state()).collect::<Vec<_>
     visual_instruction: ~
     spoken_instruction: ~
     annotation_json: ~
+    uzmatch: ~
 - Complete:
     user_location:
       coordinates:

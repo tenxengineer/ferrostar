@@ -2,6 +2,7 @@
 
 pub mod models;
 pub mod step_advance;
+pub mod uzmatch;
 pub mod waypoint_advance;
 
 #[cfg(test)]
@@ -27,6 +28,7 @@ use crate::{
 use chrono::Utc;
 use geo::geometry::LineString;
 use models::{NavState, NavigationControllerConfig, StepAdvanceStatus, TripState};
+use uzmatch::{UzmatchSnapshot, UzmatchState};
 use std::clone::Clone;
 use std::sync::Arc;
 #[cfg(feature = "wasm-bindgen")]
@@ -135,6 +137,18 @@ impl Navigator for NavigationController {
         let annotation_json = current_step_geometry_index
             .and_then(|index| current_route_step.get_annotation_at_current_index(index));
 
+        // UzNav matching core: seed from the first location when enabled.
+        let mut uzmatch_state = if self.config.uzmatch.enabled {
+            UzmatchState::default().update(&location, &self.route, &self.config.uzmatch)
+        } else {
+            UzmatchState::default()
+        };
+        let uzmatch_snapshot = if self.config.uzmatch.enabled {
+            Some(uzmatch_state.snapshot(location.timestamp))
+        } else {
+            None
+        };
+
         let initial_trip_state = TripState::Navigating {
             current_step_geometry_index,
             user_location: location,
@@ -148,6 +162,7 @@ impl Navigator for NavigationController {
             visual_instruction,
             spoken_instruction,
             annotation_json,
+            uzmatch: uzmatch_snapshot,
         };
 
         let deviation = self
@@ -166,6 +181,7 @@ impl Navigator for NavigationController {
             visual_instruction,
             spoken_instruction,
             annotation_json,
+            uzmatch,
             ..
         } = initial_trip_state
         {
@@ -192,13 +208,14 @@ impl Navigator for NavigationController {
                 visual_instruction,
                 spoken_instruction,
                 annotation_json,
+                uzmatch,
             }
         } else {
             unreachable!("initial_trip_state should always be Navigating variant")
         };
 
         let next_advance = Arc::clone(&self.config.step_advance_condition);
-        NavState::new(trip_state, next_advance)
+        NavState::new(trip_state, next_advance, uzmatch_state)
     }
 
     /// Advances navigation to the next step (or finishes the route).
@@ -217,6 +234,7 @@ impl Navigator for NavigationController {
                 ref remaining_waypoints,
                 deviation,
                 summary,
+                uzmatch,
                 ..
             } => {
                 let update = advance_step(remaining_steps);
@@ -245,13 +263,18 @@ impl Navigator for NavigationController {
                             remaining_steps,
                             remaining_waypoints,
                             deviation,
+                            uzmatch,
                         );
 
                         // Reset condition state on every step advance. Auto-advance gets a fresh
                         // condition via `should_advance_step` returning `advance_to_new_instance`,
                         // but manual advance bypasses that — without this reset, stateful latches
                         // would leak from the previous step into the next one.
-                        NavState::new(trip_state, state.step_advance_condition().new_instance())
+                        NavState::new(
+                            trip_state,
+                            state.step_advance_condition().new_instance(),
+                            state.uzmatch_state(),
+                        )
                     }
                     StepAdvanceStatus::EndOfRoute => NavState::complete(user_location, summary),
                 }
@@ -288,10 +311,33 @@ impl Navigator for NavigationController {
                     WaypointAdvanceResult::Changed(new_waypoints) => new_waypoints,
                 };
 
-                let deviation = self
-                    .config
-                    .route_deviation_tracking
-                    .check_route_deviation(&self.route, &state.trip_state());
+                // UzNav matching core update. Runs before deviation so the
+                // standing gate can suppress both deviation recalculation and
+                // step advance (vendor: no step skips from GPS jitter while
+                // standing at traffic lights).
+                let previous_deviation = state
+                    .trip_state()
+                    .deviation()
+                    .unwrap_or(RouteDeviation::NoDeviation);
+                let (uzmatch_state, uzmatch_snapshot) = if self.config.uzmatch.enabled {
+                    let mut updated =
+                        state
+                            .uzmatch_state()
+                            .update(&location, &self.route, &self.config.uzmatch);
+                    let snapshot = updated.snapshot(location.timestamp);
+                    (updated, Some(snapshot))
+                } else {
+                    (state.uzmatch_state(), None)
+                };
+                let is_standing = uzmatch_snapshot.as_ref().is_some_and(|s| s.is_standing);
+
+                let deviation = if is_standing {
+                    previous_deviation
+                } else {
+                    self.config
+                        .route_deviation_tracking
+                        .check_route_deviation(&self.route, &state.trip_state())
+                };
 
                 let is_arriving = remaining_steps.len() <= 2;
                 let intermediate_trip_state = self.create_intermediate_trip_state(
@@ -301,22 +347,35 @@ impl Navigator for NavigationController {
                     remaining_steps,
                     remaining_waypoints,
                     deviation,
+                    uzmatch_snapshot,
                 );
 
                 // Get the step advance condition result.
-                let step_advance_result = if is_arriving {
-                    self.config
-                        .arrival_step_advance_condition
-                        .should_advance_step(intermediate_trip_state.clone())
+                //
+                // While standing, the regular (non-arrival) condition is not
+                // evaluated at all: the snapped position is frozen, so any
+                // advance would be jitter-induced. Arrival conditions keep
+                // running so a stopped vehicle can still finish the route.
+                let (should_advance, next_condition) = if is_standing && !is_arriving {
+                    (false, state.step_advance_condition())
                 } else {
-                    state
-                        .step_advance_condition()
-                        .should_advance_step(intermediate_trip_state.clone())
+                    let step_advance_result = if is_arriving {
+                        self.config
+                            .arrival_step_advance_condition
+                            .should_advance_step(intermediate_trip_state.clone())
+                    } else {
+                        state
+                            .step_advance_condition()
+                            .should_advance_step(intermediate_trip_state.clone())
+                    };
+                    (
+                        step_advance_result.should_advance(),
+                        step_advance_result.next_iteration,
+                    )
                 };
 
-                let should_advance = step_advance_result.should_advance();
                 let intermediate_nav_state =
-                    NavState::new(intermediate_trip_state, step_advance_result.next_iteration);
+                    NavState::new(intermediate_trip_state, next_condition, uzmatch_state);
 
                 if should_advance {
                     // Advance to the next step
@@ -360,6 +419,7 @@ impl NavigationController {
         remaining_steps: Vec<RouteStep>,
         remaining_waypoints: Vec<Waypoint>,
         deviation: RouteDeviation,
+        uzmatch: Option<UzmatchSnapshot>,
     ) -> TripState {
         match trip_state {
             TripState::Navigating {
@@ -428,6 +488,7 @@ impl NavigationController {
                     visual_instruction,
                     spoken_instruction,
                     annotation_json,
+                    uzmatch,
                 }
             }
             // Pass through
@@ -549,8 +610,10 @@ mod tests {
         SerializableStepAdvanceCondition, StepAdvanceCondition, StepAdvanceResult,
         kan_69_test_condition_with_candidate,
     };
+    use crate::navigation_controller::uzmatch::{UzmatchConfig, UzmatchState};
     use crate::navigation_controller::test_helpers::{
-        get_test_navigation_controller_config, nav_controller_insta_settings,
+        gen_dummy_route_step, gen_route_from_steps, get_test_navigation_controller_config,
+        nav_controller_insta_settings,
     };
     use crate::routing_adapters::osrm::models::OsrmWaypointProperties;
     use crate::simulation::{
@@ -1133,6 +1196,7 @@ mod tests {
             snapped_location_course_filtering: CourseFiltering::Raw,
             step_advance_condition: Arc::new(ManualStepCondition),
             arrival_step_advance_condition: Arc::new(ManualStepCondition),
+            uzmatch: UzmatchConfig::default(),
         };
 
         let controller = create_navigator(route, config, false);
@@ -1254,6 +1318,7 @@ mod tests {
             snapped_location_course_filtering: CourseFiltering::Raw,
             step_advance_condition: Arc::new(ManualStepCondition),
             arrival_step_advance_condition: Arc::new(ManualStepCondition),
+            uzmatch: UzmatchConfig::default(),
         };
 
         let controller = create_navigator(route, config, false);
@@ -1326,6 +1391,7 @@ mod tests {
             snapped_location_course_filtering: CourseFiltering::Raw,
             step_advance_condition: Arc::clone(&pre_latched),
             arrival_step_advance_condition: Arc::clone(&pre_latched),
+            uzmatch: UzmatchConfig::default(),
         };
 
         let controller = create_navigator(route, config, false);
@@ -1336,7 +1402,8 @@ mod tests {
 
         // Replace the initial state's condition with the pre-latched one to simulate
         // having reached the end of the current step on a previous tick.
-        let state_with_latch = NavState::new(initial.trip_state(), pre_latched);
+        let state_with_latch =
+            NavState::new(initial.trip_state(), pre_latched, UzmatchState::default());
 
         // Manual advance bypasses `should_advance_step` and `advance_to_new_instance`.
         let advanced = controller.advance_to_next_step(state_with_latch);
@@ -1351,5 +1418,171 @@ mod tests {
             ),
             other => panic!("expected DistanceEntryExit, got {other:?}"),
         }
+    }
+
+    /// UzNav P1a: while the matching core reports standing, the regular step
+    /// advance condition is not evaluated, so GPS jitter across the step
+    /// boundary cannot skip the step (vendor: no step skips at traffic lights).
+    #[test]
+    fn uzmatch_standing_gates_step_advance() {
+        use crate::deviation_detection::RouteDeviationTracking;
+        use crate::models::{GeographicCoordinate, Speed};
+        use crate::navigation_controller::models::{CourseFiltering, WaypointAdvanceMode};
+        use crate::navigation_controller::step_advance::conditions::{
+            DistanceToEndOfStepCondition, ManualStepCondition,
+        };
+
+        // Three ~111 m steps (east, east, north) so that `is_arriving`
+        // (remaining <= 2) stays false and the regular condition is exercised.
+        let step1 = gen_dummy_route_step(0.0, 0.0, 0.001, 0.0);
+        let step2 = gen_dummy_route_step(0.001, 0.0, 0.002, 0.0);
+        let step3 = gen_dummy_route_step(0.002, 0.0, 0.002, 0.001);
+        let route = gen_route_from_steps(vec![step1, step2, step3]);
+
+        let config = NavigationControllerConfig {
+            waypoint_advance: WaypointAdvanceMode::WaypointWithinRange(100.0),
+            route_deviation_tracking: RouteDeviationTracking::None,
+            snapped_location_course_filtering: CourseFiltering::Raw,
+            // Advances whenever the user is within 20 m of the step end.
+            step_advance_condition: Arc::new(DistanceToEndOfStepCondition {
+                distance: 20,
+                minimum_horizontal_accuracy: 10,
+            }),
+            arrival_step_advance_condition: Arc::new(ManualStepCondition),
+            uzmatch: UzmatchConfig {
+                enabled: true,
+                ..UzmatchConfig::default()
+            },
+        };
+        let controller = NavigationController::new(route, config);
+
+        let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        let loc = |t: u64, lng: f64, speed: f64| UserLocation {
+            coordinates: GeographicCoordinate { lng, lat: 0.0 },
+            horizontal_accuracy: 5.0,
+            course_over_ground: None,
+            timestamp: t0 + Duration::from_secs(t),
+            speed: Some(Speed {
+                value: speed,
+                accuracy: None,
+            }),
+        };
+
+        let remaining = |state: &NavState| match state.trip_state() {
+            TripState::Navigating { remaining_steps, .. } => remaining_steps.len(),
+            other => panic!("expected Navigating, got {other:?}"),
+        };
+
+        // Approach and stop ~22 m before the step end (outside the 20 m
+        // threshold): the standing span reaches 7 s at t=8.
+        let mut state = controller.get_initial_state(loc(0, 0.0008, 4.0));
+        for t in 1..=8 {
+            state = controller.update_user_location(loc(t, 0.0008, 0.0), state);
+            assert_eq!(
+                remaining(&state),
+                3,
+                "must not advance while parked at t={t}"
+            );
+        }
+
+        // Standing is established; the snapshot must say so.
+        match state.trip_state() {
+            TripState::Navigating { uzmatch, .. } => {
+                assert_eq!(
+                    uzmatch.map(|s| s.is_standing),
+                    Some(true),
+                    "standing must be reported after 7 s below threshold"
+                );
+            }
+            other => panic!("expected Navigating, got {other:?}"),
+        }
+
+        // Jitter across the 20 m threshold while standing: must NOT advance.
+        for t in 9..=11 {
+            state = controller.update_user_location(loc(t, 0.00085, 0.0), state);
+            assert_eq!(
+                remaining(&state),
+                3,
+                "standing gate must swallow jitter across the step boundary at t={t}"
+            );
+        }
+
+        // Movement resumes: the gate lifts and the condition advances normally.
+        state = controller.update_user_location(loc(12, 0.00085, 8.0), state);
+        assert_eq!(
+            remaining(&state),
+            2,
+            "step must advance once the vehicle is moving again"
+        );
+    }
+
+    /// UzNav P1a: while standing, route deviation is not recalculated, so
+    /// jitter off the route line does not flap the deviation flag.
+    #[test]
+    fn uzmatch_standing_freezes_deviation() {
+        use crate::deviation_detection::RouteDeviationTracking;
+        use crate::models::{GeographicCoordinate, Speed};
+        use crate::navigation_controller::models::{CourseFiltering, WaypointAdvanceMode};
+        use crate::navigation_controller::step_advance::conditions::ManualStepCondition;
+
+        let step1 = gen_dummy_route_step(0.0, 0.0, 0.001, 0.0);
+        let step2 = gen_dummy_route_step(0.001, 0.0, 0.001, 0.001);
+        let route = gen_route_from_steps(vec![step1, step2]);
+
+        let config = NavigationControllerConfig {
+            waypoint_advance: WaypointAdvanceMode::WaypointWithinRange(100.0),
+            route_deviation_tracking: RouteDeviationTracking::StaticThreshold {
+                minimum_horizontal_accuracy: 10,
+                max_acceptable_deviation: 10.0,
+            },
+            snapped_location_course_filtering: CourseFiltering::Raw,
+            step_advance_condition: Arc::new(ManualStepCondition),
+            arrival_step_advance_condition: Arc::new(ManualStepCondition),
+            uzmatch: UzmatchConfig {
+                enabled: true,
+                ..UzmatchConfig::default()
+            },
+        };
+        let controller = NavigationController::new(route, config);
+
+        let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(2_000_000);
+        let loc = |t: u64, lat: f64, speed: f64| UserLocation {
+            coordinates: GeographicCoordinate { lng: 0.0005, lat },
+            horizontal_accuracy: 5.0,
+            course_over_ground: None,
+            timestamp: t0 + Duration::from_secs(t),
+            speed: Some(Speed {
+                value: speed,
+                accuracy: None,
+            }),
+        };
+
+        let deviation_of = |state: &NavState| state.trip_state().deviation();
+
+        // On route, then stop. The standing span reaches 7 s at t=8.
+        let mut state = controller.get_initial_state(loc(0, 0.0, 4.0));
+        for t in 1..=8 {
+            state = controller.update_user_location(loc(t, 0.0, 0.0), state);
+        }
+        assert_eq!(deviation_of(&state), Some(RouteDeviation::NoDeviation));
+
+        // While standing, jitter 50 m off the route line: deviation stays frozen.
+        for t in 9..=11 {
+            state = controller.update_user_location(loc(t, 0.0005, 0.0), state);
+            assert_eq!(
+                deviation_of(&state),
+                Some(RouteDeviation::NoDeviation),
+                "deviation must stay frozen while standing at t={t}"
+            );
+        }
+
+        // Moving again off the route: deviation detection resumes.
+        state = controller.update_user_location(loc(12, 0.0005, 8.0), state);
+        state = controller.update_user_location(loc(13, 0.0005, 8.0), state);
+        assert!(
+            matches!(deviation_of(&state), Some(RouteDeviation::Deviation { .. })),
+            "deviation must fire once moving off-route, got {:?}",
+            deviation_of(&state)
+        );
     }
 }
