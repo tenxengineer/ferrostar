@@ -3296,6 +3296,235 @@ public func FfiConverterTypeRouteAdapter_lower(_ value: RouteAdapter) -> UInt64 
 
 
 /**
+ * Streams a continuous position bound to the route polyline.
+ *
+ * Feed every route-bound fix via [`Self::on_route_bound_location`] and drive
+ * rendering with [`Self::advance_to`] at the display frame rate (vendor
+ * `LOCATION_PUBLISHING_FRAME_RATE` = 20 Hz).
+ */
+public protocol RouteBoundStreamerProtocol: AnyObject, Sendable {
+    
+    /**
+     * Advance the rendered position to `now` (vendor `BoundMotion::advanceTo`
+     * plus the `MAX_REASONABLE_ADVANCEMENT` reset from `LocationStreamer::location`).
+     */
+    func advanceTo(now: Date)  -> StreamedPosition?
+    
+    /**
+     * Whether the motion is currently available (vendor `isMotionAvailable`).
+     */
+    func isAvailable()  -> Bool
+    
+    /**
+     * Supply a fresh route-bound location (vendor `BoundMotion::supplyLocation`
+     * with the constructor delay check folded in for the first fix).
+     */
+    func onRouteBoundLocation(location: UserLocation, distanceAlongRouteMeters: Double) 
+    
+    /**
+     * Non-mutating preview of the rendered position at `now`.
+     *
+     * UzMap display policy: the Android puck animates between location updates
+     * over a fixed window, so the consumer needs the motion's position at
+     * animation end WITHOUT advancing the streamer's tick clock. Call order per
+     * fix: [`Self::advance_to`] (catch the motion clock up), then
+     * [`Self::on_route_bound_location`], then `preview_at(now + window)`.
+     */
+    func previewAt(now: Date)  -> StreamedPosition?
+    
+    /**
+     * Vendor `reset`/`doResetMotion`.
+     */
+    func reset() 
+    
+}
+/**
+ * Streams a continuous position bound to the route polyline.
+ *
+ * Feed every route-bound fix via [`Self::on_route_bound_location`] and drive
+ * rendering with [`Self::advance_to`] at the display frame rate (vendor
+ * `LOCATION_PUBLISHING_FRAME_RATE` = 20 Hz).
+ */
+open class RouteBoundStreamer: RouteBoundStreamerProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_ferrostar_fn_clone_routeboundstreamer(self.handle, $0) }
+    }
+    /**
+     * Create a streamer for a route. Recreate on route change (vendor `setRoute`).
+     */
+public convenience init(route: Route) {
+    let handle =
+        try! rustCall() {
+    uniffi_ferrostar_fn_constructor_routeboundstreamer_new(
+        FfiConverterTypeRoute_lower(route),$0
+    )
+}
+    self.init(unsafeFromHandle: handle)
+}
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_ferrostar_fn_free_routeboundstreamer(handle, $0) }
+    }
+
+    
+
+    
+    /**
+     * Advance the rendered position to `now` (vendor `BoundMotion::advanceTo`
+     * plus the `MAX_REASONABLE_ADVANCEMENT` reset from `LocationStreamer::location`).
+     */
+open func advanceTo(now: Date) -> StreamedPosition?  {
+    return try!  FfiConverterOptionTypeStreamedPosition.lift(try! rustCall() {
+    uniffi_ferrostar_fn_method_routeboundstreamer_advance_to(
+            self.uniffiCloneHandle(),
+        FfiConverterTimestamp.lower(now),$0
+    )
+})
+}
+    
+    /**
+     * Whether the motion is currently available (vendor `isMotionAvailable`).
+     */
+open func isAvailable() -> Bool  {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+    uniffi_ferrostar_fn_method_routeboundstreamer_is_available(
+            self.uniffiCloneHandle(),$0
+    )
+})
+}
+    
+    /**
+     * Supply a fresh route-bound location (vendor `BoundMotion::supplyLocation`
+     * with the constructor delay check folded in for the first fix).
+     */
+open func onRouteBoundLocation(location: UserLocation, distanceAlongRouteMeters: Double)  {try! rustCall() {
+    uniffi_ferrostar_fn_method_routeboundstreamer_on_route_bound_location(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeUserLocation_lower(location),
+        FfiConverterDouble.lower(distanceAlongRouteMeters),$0
+    )
+}
+}
+    
+    /**
+     * Non-mutating preview of the rendered position at `now`.
+     *
+     * UzMap display policy: the Android puck animates between location updates
+     * over a fixed window, so the consumer needs the motion's position at
+     * animation end WITHOUT advancing the streamer's tick clock. Call order per
+     * fix: [`Self::advance_to`] (catch the motion clock up), then
+     * [`Self::on_route_bound_location`], then `preview_at(now + window)`.
+     */
+open func previewAt(now: Date) -> StreamedPosition?  {
+    return try!  FfiConverterOptionTypeStreamedPosition.lift(try! rustCall() {
+    uniffi_ferrostar_fn_method_routeboundstreamer_preview_at(
+            self.uniffiCloneHandle(),
+        FfiConverterTimestamp.lower(now),$0
+    )
+})
+}
+    
+    /**
+     * Vendor `reset`/`doResetMotion`.
+     */
+open func reset()  {try! rustCall() {
+    uniffi_ferrostar_fn_method_routeboundstreamer_reset(
+            self.uniffiCloneHandle(),$0
+    )
+}
+}
+    
+
+    
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRouteBoundStreamer: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = RouteBoundStreamer
+
+    public static func lift(_ handle: UInt64) throws -> RouteBoundStreamer {
+        return RouteBoundStreamer(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: RouteBoundStreamer) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RouteBoundStreamer {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: RouteBoundStreamer, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRouteBoundStreamer_lift(_ handle: UInt64) throws -> RouteBoundStreamer {
+    return try FfiConverterTypeRouteBoundStreamer.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRouteBoundStreamer_lower(_ value: RouteBoundStreamer) -> UInt64 {
+    return FfiConverterTypeRouteBoundStreamer.lower(value)
+}
+
+
+
+
+
+
+/**
  * A custom deviation detector (for extending the behavior of [`RouteDeviationTracking`]).
  *
  * This allows for arbitrarily complex implementations when the provided ones are not enough.
@@ -4813,6 +5042,63 @@ public func FfiConverterTypeLaneInfo_lower(_ value: LaneInfo) -> RustBuffer {
 
 
 /**
+ * Pure state machine; only non-decreasing timestamps are supported (vendor contract).
+ */
+public struct LocationClassState: Equatable, Hashable, Codable {
+    public var `class`: UzLocationClass
+    public var since: Date?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(`class`: UzLocationClass, since: Date?) {
+        self.`class` = `class`
+        self.since = since
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension LocationClassState: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeLocationClassState: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> LocationClassState {
+        return
+            try LocationClassState(
+                class: FfiConverterTypeUzLocationClass.read(from: &buf), 
+                since: FfiConverterOptionTimestamp.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: LocationClassState, into buf: inout [UInt8]) {
+        FfiConverterTypeUzLocationClass.write(value.`class`, into: &buf)
+        FfiConverterOptionTimestamp.write(value.since, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLocationClassState_lift(_ buf: RustBuffer) throws -> LocationClassState {
+    return try FfiConverterTypeLocationClassState.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLocationClassState_lower(_ value: LocationClassState) -> RustBuffer {
+    return FfiConverterTypeLocationClassState.lower(value)
+}
+
+
+/**
  * The current state of the simulation.
  */
 public struct LocationSimulationState: Equatable, Hashable, Codable {
@@ -4874,6 +5160,85 @@ public func FfiConverterTypeLocationSimulationState_lower(_ value: LocationSimul
 
 
 /**
+ * A sampled point of the one-dimensional motion (vendor `OneDimensionalMotion::Point`).
+ */
+public struct MotionPoint: Equatable, Hashable, Codable {
+    /**
+     * Seconds since the motion started.
+     */
+    public var time: Double
+    /**
+     * Distance covered since the motion started, in meters.
+     */
+    public var distance: Double
+    /**
+     * Instantaneous speed at this point, in m/s.
+     */
+    public var speed: Double
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Seconds since the motion started.
+         */time: Double, 
+        /**
+         * Distance covered since the motion started, in meters.
+         */distance: Double, 
+        /**
+         * Instantaneous speed at this point, in m/s.
+         */speed: Double) {
+        self.time = time
+        self.distance = distance
+        self.speed = speed
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension MotionPoint: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeMotionPoint: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> MotionPoint {
+        return
+            try MotionPoint(
+                time: FfiConverterDouble.read(from: &buf), 
+                distance: FfiConverterDouble.read(from: &buf), 
+                speed: FfiConverterDouble.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: MotionPoint, into buf: inout [UInt8]) {
+        FfiConverterDouble.write(value.time, into: &buf)
+        FfiConverterDouble.write(value.distance, into: &buf)
+        FfiConverterDouble.write(value.speed, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeMotionPoint_lift(_ buf: RustBuffer) throws -> MotionPoint {
+    return try FfiConverterTypeMotionPoint.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeMotionPoint_lower(_ value: MotionPoint) -> RustBuffer {
+    return FfiConverterTypeMotionPoint.lower(value)
+}
+
+
+/**
  * The navigation state.
  *
  * This is typically created from an initial trip state
@@ -4884,12 +5249,14 @@ public func FfiConverterTypeLocationSimulationState_lower(_ value: LocationSimul
 public struct NavState {
     public var tripState: TripState
     public var stepAdvanceCondition: StepAdvanceCondition
+    public var uzmatchState: UzmatchState
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(tripState: TripState, stepAdvanceCondition: StepAdvanceCondition) {
+    public init(tripState: TripState, stepAdvanceCondition: StepAdvanceCondition, uzmatchState: UzmatchState) {
         self.tripState = tripState
         self.stepAdvanceCondition = stepAdvanceCondition
+        self.uzmatchState = uzmatchState
     }
 
     
@@ -4909,13 +5276,15 @@ public struct FfiConverterTypeNavState: FfiConverterRustBuffer {
         return
             try NavState(
                 tripState: FfiConverterTypeTripState.read(from: &buf), 
-                stepAdvanceCondition: FfiConverterTypeStepAdvanceCondition.read(from: &buf)
+                stepAdvanceCondition: FfiConverterTypeStepAdvanceCondition.read(from: &buf), 
+                uzmatchState: FfiConverterTypeUzmatchState.read(from: &buf)
         )
     }
 
     public static func write(_ value: NavState, into buf: inout [UInt8]) {
         FfiConverterTypeTripState.write(value.tripState, into: &buf)
         FfiConverterTypeStepAdvanceCondition.write(value.stepAdvanceCondition, into: &buf)
+        FfiConverterTypeUzmatchState.write(value.uzmatchState, into: &buf)
     }
 }
 
@@ -5017,6 +5386,12 @@ public struct NavigationControllerConfig {
      * Configures how the heading component of the snapped location is reported in [`TripState`].
      */
     public var snappedLocationCourseFiltering: CourseFiltering
+    /**
+     * UzNav matching core configuration (standing detection, heading-aware
+     * snap, location classification, speed filtering). Disabled by default,
+     * preserving upstream behavior.
+     */
+    public var uzmatch: UzmatchConfig
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -5042,12 +5417,18 @@ public struct NavigationControllerConfig {
          */routeDeviationTracking: RouteDeviationTracking, 
         /**
          * Configures how the heading component of the snapped location is reported in [`TripState`].
-         */snappedLocationCourseFiltering: CourseFiltering) {
+         */snappedLocationCourseFiltering: CourseFiltering, 
+        /**
+         * UzNav matching core configuration (standing detection, heading-aware
+         * snap, location classification, speed filtering). Disabled by default,
+         * preserving upstream behavior.
+         */uzmatch: UzmatchConfig) {
         self.waypointAdvance = waypointAdvance
         self.stepAdvanceCondition = stepAdvanceCondition
         self.arrivalStepAdvanceCondition = arrivalStepAdvanceCondition
         self.routeDeviationTracking = routeDeviationTracking
         self.snappedLocationCourseFiltering = snappedLocationCourseFiltering
+        self.uzmatch = uzmatch
     }
 
     
@@ -5070,7 +5451,8 @@ public struct FfiConverterTypeNavigationControllerConfig: FfiConverterRustBuffer
                 stepAdvanceCondition: FfiConverterTypeStepAdvanceCondition.read(from: &buf), 
                 arrivalStepAdvanceCondition: FfiConverterTypeStepAdvanceCondition.read(from: &buf), 
                 routeDeviationTracking: FfiConverterTypeRouteDeviationTracking.read(from: &buf), 
-                snappedLocationCourseFiltering: FfiConverterTypeCourseFiltering.read(from: &buf)
+                snappedLocationCourseFiltering: FfiConverterTypeCourseFiltering.read(from: &buf), 
+                uzmatch: FfiConverterTypeUzmatchConfig.read(from: &buf)
         )
     }
 
@@ -5080,6 +5462,7 @@ public struct FfiConverterTypeNavigationControllerConfig: FfiConverterRustBuffer
         FfiConverterTypeStepAdvanceCondition.write(value.arrivalStepAdvanceCondition, into: &buf)
         FfiConverterTypeRouteDeviationTracking.write(value.routeDeviationTracking, into: &buf)
         FfiConverterTypeCourseFiltering.write(value.snappedLocationCourseFiltering, into: &buf)
+        FfiConverterTypeUzmatchConfig.write(value.uzmatch, into: &buf)
     }
 }
 
@@ -5392,6 +5775,105 @@ public func FfiConverterTypeRoute_lower(_ value: Route) -> RustBuffer {
 
 
 /**
+ * The user's position on the route polyline, route-global.
+ */
+public struct RoutePosition: Equatable, Hashable, Codable {
+    /**
+     * Index of the route geometry segment (segment `i` runs from vertex `i` to `i + 1`).
+     */
+    public var segmentIndex: UInt64
+    /**
+     * Distance in meters from the segment's first vertex to the projected point.
+     */
+    public var segmentOffsetMeters: Double
+    /**
+     * Absolute distance in meters from the start of the route.
+     */
+    public var distanceAlongRouteMeters: Double
+    /**
+     * The snapped coordinate on the route polyline.
+     */
+    public var coordinates: GeographicCoordinate
+    /**
+     * The route's bearing at the snapped position.
+     */
+    public var courseOverGround: CourseOverGround?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Index of the route geometry segment (segment `i` runs from vertex `i` to `i + 1`).
+         */segmentIndex: UInt64, 
+        /**
+         * Distance in meters from the segment's first vertex to the projected point.
+         */segmentOffsetMeters: Double, 
+        /**
+         * Absolute distance in meters from the start of the route.
+         */distanceAlongRouteMeters: Double, 
+        /**
+         * The snapped coordinate on the route polyline.
+         */coordinates: GeographicCoordinate, 
+        /**
+         * The route's bearing at the snapped position.
+         */courseOverGround: CourseOverGround?) {
+        self.segmentIndex = segmentIndex
+        self.segmentOffsetMeters = segmentOffsetMeters
+        self.distanceAlongRouteMeters = distanceAlongRouteMeters
+        self.coordinates = coordinates
+        self.courseOverGround = courseOverGround
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension RoutePosition: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRoutePosition: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RoutePosition {
+        return
+            try RoutePosition(
+                segmentIndex: FfiConverterUInt64.read(from: &buf), 
+                segmentOffsetMeters: FfiConverterDouble.read(from: &buf), 
+                distanceAlongRouteMeters: FfiConverterDouble.read(from: &buf), 
+                coordinates: FfiConverterTypeGeographicCoordinate.read(from: &buf), 
+                courseOverGround: FfiConverterOptionTypeCourseOverGround.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: RoutePosition, into buf: inout [UInt8]) {
+        FfiConverterUInt64.write(value.segmentIndex, into: &buf)
+        FfiConverterDouble.write(value.segmentOffsetMeters, into: &buf)
+        FfiConverterDouble.write(value.distanceAlongRouteMeters, into: &buf)
+        FfiConverterTypeGeographicCoordinate.write(value.coordinates, into: &buf)
+        FfiConverterOptionTypeCourseOverGround.write(value.courseOverGround, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRoutePosition_lift(_ buf: RustBuffer) throws -> RoutePosition {
+    return try FfiConverterTypeRoutePosition.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRoutePosition_lower(_ value: RoutePosition) -> RustBuffer {
+    return FfiConverterTypeRoutePosition.lower(value)
+}
+
+
+/**
  * A maneuver (such as a turn or merge) followed by travel of a certain distance until reaching
  * the next step.
  */
@@ -5578,12 +6060,14 @@ public func FfiConverterTypeRouteStep_lower(_ value: RouteStep) -> RustBuffer {
 public struct SerializableNavState: Equatable, Hashable, Codable {
     public var tripState: TripState
     public var stepAdvanceCondition: SerializableStepAdvanceCondition
+    public var uzmatchState: UzmatchState
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(tripState: TripState, stepAdvanceCondition: SerializableStepAdvanceCondition) {
+    public init(tripState: TripState, stepAdvanceCondition: SerializableStepAdvanceCondition, uzmatchState: UzmatchState) {
         self.tripState = tripState
         self.stepAdvanceCondition = stepAdvanceCondition
+        self.uzmatchState = uzmatchState
     }
 
     
@@ -5603,13 +6087,15 @@ public struct FfiConverterTypeSerializableNavState: FfiConverterRustBuffer {
         return
             try SerializableNavState(
                 tripState: FfiConverterTypeTripState.read(from: &buf), 
-                stepAdvanceCondition: FfiConverterTypeSerializableStepAdvanceCondition.read(from: &buf)
+                stepAdvanceCondition: FfiConverterTypeSerializableStepAdvanceCondition.read(from: &buf), 
+                uzmatchState: FfiConverterTypeUzmatchState.read(from: &buf)
         )
     }
 
     public static func write(_ value: SerializableNavState, into buf: inout [UInt8]) {
         FfiConverterTypeTripState.write(value.tripState, into: &buf)
         FfiConverterTypeSerializableStepAdvanceCondition.write(value.stepAdvanceCondition, into: &buf)
+        FfiConverterTypeUzmatchState.write(value.uzmatchState, into: &buf)
     }
 }
 
@@ -5695,6 +6181,75 @@ public func FfiConverterTypeSpeed_lift(_ buf: RustBuffer) throws -> Speed {
 #endif
 public func FfiConverterTypeSpeed_lower(_ value: Speed) -> RustBuffer {
     return FfiConverterTypeSpeed.lower(value)
+}
+
+
+/**
+ * A speed sample with its observation time.
+ */
+public struct SpeedSample: Equatable, Hashable, Codable {
+    /**
+     * Speed in meters per second.
+     */
+    public var speedMps: Double
+    /**
+     * When the sample was observed.
+     */
+    public var timestamp: Date
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Speed in meters per second.
+         */speedMps: Double, 
+        /**
+         * When the sample was observed.
+         */timestamp: Date) {
+        self.speedMps = speedMps
+        self.timestamp = timestamp
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension SpeedSample: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSpeedSample: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SpeedSample {
+        return
+            try SpeedSample(
+                speedMps: FfiConverterDouble.read(from: &buf), 
+                timestamp: FfiConverterTimestamp.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: SpeedSample, into buf: inout [UInt8]) {
+        FfiConverterDouble.write(value.speedMps, into: &buf)
+        FfiConverterTimestamp.write(value.timestamp, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSpeedSample_lift(_ buf: RustBuffer) throws -> SpeedSample {
+    return try FfiConverterTypeSpeedSample.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSpeedSample_lower(_ value: SpeedSample) -> RustBuffer {
+    return FfiConverterTypeSpeedSample.lower(value)
 }
 
 
@@ -5804,6 +6359,85 @@ public func FfiConverterTypeSpokenInstruction_lower(_ value: SpokenInstruction) 
 
 
 /**
+ * Standing detector state carried inside [`super::UzmatchState`].
+ */
+public struct StandingState: Equatable, Hashable, Codable {
+    /**
+     * Vendor `oldestStandingSignalTimestamp_`.
+     */
+    public var oldestSignal: Date?
+    /**
+     * Vendor `latestStandingSignalTimestamp_`.
+     */
+    public var latestSignal: Date?
+    /**
+     * Vendor `currentStatus_ == Standing`.
+     */
+    public var isStanding: Bool
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Vendor `oldestStandingSignalTimestamp_`.
+         */oldestSignal: Date?, 
+        /**
+         * Vendor `latestStandingSignalTimestamp_`.
+         */latestSignal: Date?, 
+        /**
+         * Vendor `currentStatus_ == Standing`.
+         */isStanding: Bool) {
+        self.oldestSignal = oldestSignal
+        self.latestSignal = latestSignal
+        self.isStanding = isStanding
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension StandingState: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeStandingState: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> StandingState {
+        return
+            try StandingState(
+                oldestSignal: FfiConverterOptionTimestamp.read(from: &buf), 
+                latestSignal: FfiConverterOptionTimestamp.read(from: &buf), 
+                isStanding: FfiConverterBool.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: StandingState, into buf: inout [UInt8]) {
+        FfiConverterOptionTimestamp.write(value.oldestSignal, into: &buf)
+        FfiConverterOptionTimestamp.write(value.latestSignal, into: &buf)
+        FfiConverterBool.write(value.isStanding, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeStandingState_lift(_ buf: RustBuffer) throws -> StandingState {
+    return try FfiConverterTypeStandingState.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeStandingState_lower(_ value: StandingState) -> RustBuffer {
+    return FfiConverterTypeStandingState.lower(value)
+}
+
+
+/**
  * The step advance result is produced on every iteration of the navigation state machine and
  * used by the navigation to build a new [`NavState`](super::NavState) instance for that update.
  */
@@ -5894,6 +6528,95 @@ public func FfiConverterTypeStepAdvanceResult_lift(_ buf: RustBuffer) throws -> 
 #endif
 public func FfiConverterTypeStepAdvanceResult_lower(_ value: StepAdvanceResult) -> RustBuffer {
     return FfiConverterTypeStepAdvanceResult.lower(value)
+}
+
+
+/**
+ * A streamed position on the route, produced at display frame rate.
+ */
+public struct StreamedPosition: Equatable, Hashable, Codable {
+    /**
+     * Interpolated coordinate on the route polyline.
+     */
+    public var coordinates: GeographicCoordinate
+    /**
+     * Route bearing at the position.
+     */
+    public var courseOverGround: CourseOverGround?
+    /**
+     * Absolute route distance of the rendered position.
+     */
+    public var distanceAlongRouteMeters: Double
+    /**
+     * Instantaneous speed of the motion, in m/s.
+     */
+    public var speedMps: Double?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Interpolated coordinate on the route polyline.
+         */coordinates: GeographicCoordinate, 
+        /**
+         * Route bearing at the position.
+         */courseOverGround: CourseOverGround?, 
+        /**
+         * Absolute route distance of the rendered position.
+         */distanceAlongRouteMeters: Double, 
+        /**
+         * Instantaneous speed of the motion, in m/s.
+         */speedMps: Double?) {
+        self.coordinates = coordinates
+        self.courseOverGround = courseOverGround
+        self.distanceAlongRouteMeters = distanceAlongRouteMeters
+        self.speedMps = speedMps
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension StreamedPosition: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeStreamedPosition: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> StreamedPosition {
+        return
+            try StreamedPosition(
+                coordinates: FfiConverterTypeGeographicCoordinate.read(from: &buf), 
+                courseOverGround: FfiConverterOptionTypeCourseOverGround.read(from: &buf), 
+                distanceAlongRouteMeters: FfiConverterDouble.read(from: &buf), 
+                speedMps: FfiConverterOptionDouble.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: StreamedPosition, into buf: inout [UInt8]) {
+        FfiConverterTypeGeographicCoordinate.write(value.coordinates, into: &buf)
+        FfiConverterOptionTypeCourseOverGround.write(value.courseOverGround, into: &buf)
+        FfiConverterDouble.write(value.distanceAlongRouteMeters, into: &buf)
+        FfiConverterOptionDouble.write(value.speedMps, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeStreamedPosition_lift(_ buf: RustBuffer) throws -> StreamedPosition {
+    return try FfiConverterTypeStreamedPosition.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeStreamedPosition_lower(_ value: StreamedPosition) -> RustBuffer {
+    return FfiConverterTypeStreamedPosition.lower(value)
 }
 
 
@@ -6148,6 +6871,340 @@ public func FfiConverterTypeUserLocation_lift(_ buf: RustBuffer) throws -> UserL
 #endif
 public func FfiConverterTypeUserLocation_lower(_ value: UserLocation) -> RustBuffer {
     return FfiConverterTypeUserLocation.lower(value)
+}
+
+
+/**
+ * Configuration for the UzNav matching core.
+ *
+ * Defaults are the vendor constants; see each field for provenance.
+ */
+public struct UzmatchConfig: Equatable, Hashable, Codable {
+    /**
+     * Master switch. When false, the controller behaves exactly like upstream
+     * Ferrostar and [`TripState::Navigating::uzmatch`] stays `None`.
+     *
+     * [`TripState::Navigating::uzmatch`]: crate::navigation_controller::models::TripState::Navigating
+     */
+    public var enabled: Bool
+    /**
+     * Vendor `standing_guide_standing_speed` (0.5 m/s): speeds at or below
+     * this count as standing signals.
+     */
+    public var standingSpeedThresholdMps: Double
+    /**
+     * Vendor `standing_guide_detection_period` (7000 ms): continuous
+     * standing-signal span required to report standing.
+     */
+    public var standingDetectionPeriodMs: UInt64
+    /**
+     * Vendor `standing_guide_signal_interval` (5000 ms): standing history
+     * expires when no signal arrives within this interval.
+     */
+    public var standingSignalExpiryMs: UInt64
+    /**
+     * Vendor analyzer `GPS_POSITION_ERROR_STDDEV` (8.0 m): geometric emission sigma.
+     */
+    public var snapPositionStddevM: Double
+    /**
+     * Vendor analyzer `GPS_HEADING_ERROR_STDDEV` (6.0 deg): directional emission sigma.
+     */
+    public var snapHeadingStddevDeg: Double
+    /**
+     * Vendor `IGNORE_HEADING_WHEN_SLOWER` mechanism; UzNav threshold 4.0 m/s
+     * (vendor default 0). Below this speed the heading term is ignored.
+     */
+    public var snapHeadingMinSpeedMps: Double
+    /**
+     * UzNav policy (no vendor equivalent extracted): a location with
+     * horizontal accuracy at or below this feeds the LCSM as a *fine* fix.
+     */
+    public var fineAccuracyThresholdM: Double
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Master switch. When false, the controller behaves exactly like upstream
+         * Ferrostar and [`TripState::Navigating::uzmatch`] stays `None`.
+         *
+         * [`TripState::Navigating::uzmatch`]: crate::navigation_controller::models::TripState::Navigating
+         */enabled: Bool, 
+        /**
+         * Vendor `standing_guide_standing_speed` (0.5 m/s): speeds at or below
+         * this count as standing signals.
+         */standingSpeedThresholdMps: Double, 
+        /**
+         * Vendor `standing_guide_detection_period` (7000 ms): continuous
+         * standing-signal span required to report standing.
+         */standingDetectionPeriodMs: UInt64, 
+        /**
+         * Vendor `standing_guide_signal_interval` (5000 ms): standing history
+         * expires when no signal arrives within this interval.
+         */standingSignalExpiryMs: UInt64, 
+        /**
+         * Vendor analyzer `GPS_POSITION_ERROR_STDDEV` (8.0 m): geometric emission sigma.
+         */snapPositionStddevM: Double, 
+        /**
+         * Vendor analyzer `GPS_HEADING_ERROR_STDDEV` (6.0 deg): directional emission sigma.
+         */snapHeadingStddevDeg: Double, 
+        /**
+         * Vendor `IGNORE_HEADING_WHEN_SLOWER` mechanism; UzNav threshold 4.0 m/s
+         * (vendor default 0). Below this speed the heading term is ignored.
+         */snapHeadingMinSpeedMps: Double, 
+        /**
+         * UzNav policy (no vendor equivalent extracted): a location with
+         * horizontal accuracy at or below this feeds the LCSM as a *fine* fix.
+         */fineAccuracyThresholdM: Double) {
+        self.enabled = enabled
+        self.standingSpeedThresholdMps = standingSpeedThresholdMps
+        self.standingDetectionPeriodMs = standingDetectionPeriodMs
+        self.standingSignalExpiryMs = standingSignalExpiryMs
+        self.snapPositionStddevM = snapPositionStddevM
+        self.snapHeadingStddevDeg = snapHeadingStddevDeg
+        self.snapHeadingMinSpeedMps = snapHeadingMinSpeedMps
+        self.fineAccuracyThresholdM = fineAccuracyThresholdM
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension UzmatchConfig: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeUzmatchConfig: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UzmatchConfig {
+        return
+            try UzmatchConfig(
+                enabled: FfiConverterBool.read(from: &buf), 
+                standingSpeedThresholdMps: FfiConverterDouble.read(from: &buf), 
+                standingDetectionPeriodMs: FfiConverterUInt64.read(from: &buf), 
+                standingSignalExpiryMs: FfiConverterUInt64.read(from: &buf), 
+                snapPositionStddevM: FfiConverterDouble.read(from: &buf), 
+                snapHeadingStddevDeg: FfiConverterDouble.read(from: &buf), 
+                snapHeadingMinSpeedMps: FfiConverterDouble.read(from: &buf), 
+                fineAccuracyThresholdM: FfiConverterDouble.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: UzmatchConfig, into buf: inout [UInt8]) {
+        FfiConverterBool.write(value.enabled, into: &buf)
+        FfiConverterDouble.write(value.standingSpeedThresholdMps, into: &buf)
+        FfiConverterUInt64.write(value.standingDetectionPeriodMs, into: &buf)
+        FfiConverterUInt64.write(value.standingSignalExpiryMs, into: &buf)
+        FfiConverterDouble.write(value.snapPositionStddevM, into: &buf)
+        FfiConverterDouble.write(value.snapHeadingStddevDeg, into: &buf)
+        FfiConverterDouble.write(value.snapHeadingMinSpeedMps, into: &buf)
+        FfiConverterDouble.write(value.fineAccuracyThresholdM, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeUzmatchConfig_lift(_ buf: RustBuffer) throws -> UzmatchConfig {
+    return try FfiConverterTypeUzmatchConfig.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeUzmatchConfig_lower(_ value: UzmatchConfig) -> RustBuffer {
+    return FfiConverterTypeUzmatchConfig.lower(value)
+}
+
+
+/**
+ * Public snapshot of the matching core, attached to every
+ * `TripState::Navigating` while uzmatch is enabled.
+ */
+public struct UzmatchSnapshot: Equatable, Hashable, Codable {
+    /**
+     * Route-global position from the heading-aware snap; `None` while the
+     * location class is not accurate (vendor does not bind coarse locations).
+     */
+    public var routePosition: RoutePosition?
+    /**
+     * True when the user has been at/below the standing speed threshold for
+     * the detection period. Gates step advance and deviation recalculation.
+     */
+    public var isStanding: Bool
+    /**
+     * Current location class from the LCSM.
+     */
+    public var locationClass: UzLocationClass
+    /**
+     * Low-pass filtered speed in m/s (vendor `SpeedFilter`); `None` until at
+     * least two fresh samples exist.
+     */
+    public var filteredSpeedMps: Double?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Route-global position from the heading-aware snap; `None` while the
+         * location class is not accurate (vendor does not bind coarse locations).
+         */routePosition: RoutePosition?, 
+        /**
+         * True when the user has been at/below the standing speed threshold for
+         * the detection period. Gates step advance and deviation recalculation.
+         */isStanding: Bool, 
+        /**
+         * Current location class from the LCSM.
+         */locationClass: UzLocationClass, 
+        /**
+         * Low-pass filtered speed in m/s (vendor `SpeedFilter`); `None` until at
+         * least two fresh samples exist.
+         */filteredSpeedMps: Double?) {
+        self.routePosition = routePosition
+        self.isStanding = isStanding
+        self.locationClass = locationClass
+        self.filteredSpeedMps = filteredSpeedMps
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension UzmatchSnapshot: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeUzmatchSnapshot: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UzmatchSnapshot {
+        return
+            try UzmatchSnapshot(
+                routePosition: FfiConverterOptionTypeRoutePosition.read(from: &buf), 
+                isStanding: FfiConverterBool.read(from: &buf), 
+                locationClass: FfiConverterTypeUzLocationClass.read(from: &buf), 
+                filteredSpeedMps: FfiConverterOptionDouble.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: UzmatchSnapshot, into buf: inout [UInt8]) {
+        FfiConverterOptionTypeRoutePosition.write(value.routePosition, into: &buf)
+        FfiConverterBool.write(value.isStanding, into: &buf)
+        FfiConverterTypeUzLocationClass.write(value.locationClass, into: &buf)
+        FfiConverterOptionDouble.write(value.filteredSpeedMps, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeUzmatchSnapshot_lift(_ buf: RustBuffer) throws -> UzmatchSnapshot {
+    return try FfiConverterTypeUzmatchSnapshot.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeUzmatchSnapshot_lower(_ value: UzmatchSnapshot) -> RustBuffer {
+    return FfiConverterTypeUzmatchSnapshot.lower(value)
+}
+
+
+/**
+ * Internal evolving state of the matching core, packed into
+ * [`NavState`](crate::navigation_controller::models::NavState) so the
+ * controller remains functionally pure.
+ */
+public struct UzmatchState: Equatable, Hashable, Codable {
+    /**
+     * Standing detector state.
+     */
+    public var standing: StandingState
+    /**
+     * Location class state machine state.
+     */
+    public var locationClass: LocationClassState
+    /**
+     * Speed filter sample window.
+     */
+    public var speedHistory: [SpeedSample]
+    /**
+     * Latest route position (heading-aware snap).
+     */
+    public var routePosition: RoutePosition?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Standing detector state.
+         */standing: StandingState, 
+        /**
+         * Location class state machine state.
+         */locationClass: LocationClassState, 
+        /**
+         * Speed filter sample window.
+         */speedHistory: [SpeedSample], 
+        /**
+         * Latest route position (heading-aware snap).
+         */routePosition: RoutePosition?) {
+        self.standing = standing
+        self.locationClass = locationClass
+        self.speedHistory = speedHistory
+        self.routePosition = routePosition
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension UzmatchState: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeUzmatchState: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UzmatchState {
+        return
+            try UzmatchState(
+                standing: FfiConverterTypeStandingState.read(from: &buf), 
+                locationClass: FfiConverterTypeLocationClassState.read(from: &buf), 
+                speedHistory: FfiConverterSequenceTypeSpeedSample.read(from: &buf), 
+                routePosition: FfiConverterOptionTypeRoutePosition.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: UzmatchState, into buf: inout [UInt8]) {
+        FfiConverterTypeStandingState.write(value.standing, into: &buf)
+        FfiConverterTypeLocationClassState.write(value.locationClass, into: &buf)
+        FfiConverterSequenceTypeSpeedSample.write(value.speedHistory, into: &buf)
+        FfiConverterOptionTypeRoutePosition.write(value.routePosition, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeUzmatchState_lift(_ buf: RustBuffer) throws -> UzmatchState {
+    return try FfiConverterTypeUzmatchState.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeUzmatchState_lower(_ value: UzmatchState) -> RustBuffer {
+    return FfiConverterTypeUzmatchState.lower(value)
 }
 
 
@@ -9123,7 +10180,12 @@ public enum TripState: Equatable, Hashable, Codable {
         /**
          * Annotation data at the current location.
          * This is represented as a json formatted byte array to allow for flexible encoding of custom annotations.
-         */annotationJson: String?
+         */annotationJson: String?, 
+        /**
+         * UzNav matching core snapshot (route position, standing, location
+         * class, filtered speed). `None` unless
+         * [`NavigationControllerConfig::uzmatch`] is enabled.
+         */uzmatch: UzmatchSnapshot?
     )
     /**
      * The navigation controller has reached the end of the trip.
@@ -9158,7 +10220,7 @@ public struct FfiConverterTypeTripState: FfiConverterRustBuffer {
         case 1: return .idle(userLocation: try FfiConverterOptionTypeUserLocation.read(from: &buf)
         )
         
-        case 2: return .navigating(currentStepGeometryIndex: try FfiConverterOptionUInt64.read(from: &buf), userLocation: try FfiConverterTypeUserLocation.read(from: &buf), snappedUserLocation: try FfiConverterTypeUserLocation.read(from: &buf), remainingSteps: try FfiConverterSequenceTypeRouteStep.read(from: &buf), remainingWaypoints: try FfiConverterSequenceTypeWaypoint.read(from: &buf), progress: try FfiConverterTypeTripProgress.read(from: &buf), summary: try FfiConverterTypeTripSummary.read(from: &buf), deviation: try FfiConverterTypeRouteDeviation.read(from: &buf), visualInstruction: try FfiConverterOptionTypeVisualInstruction.read(from: &buf), spokenInstruction: try FfiConverterOptionTypeSpokenInstruction.read(from: &buf), annotationJson: try FfiConverterOptionString.read(from: &buf)
+        case 2: return .navigating(currentStepGeometryIndex: try FfiConverterOptionUInt64.read(from: &buf), userLocation: try FfiConverterTypeUserLocation.read(from: &buf), snappedUserLocation: try FfiConverterTypeUserLocation.read(from: &buf), remainingSteps: try FfiConverterSequenceTypeRouteStep.read(from: &buf), remainingWaypoints: try FfiConverterSequenceTypeWaypoint.read(from: &buf), progress: try FfiConverterTypeTripProgress.read(from: &buf), summary: try FfiConverterTypeTripSummary.read(from: &buf), deviation: try FfiConverterTypeRouteDeviation.read(from: &buf), visualInstruction: try FfiConverterOptionTypeVisualInstruction.read(from: &buf), spokenInstruction: try FfiConverterOptionTypeSpokenInstruction.read(from: &buf), annotationJson: try FfiConverterOptionString.read(from: &buf), uzmatch: try FfiConverterOptionTypeUzmatchSnapshot.read(from: &buf)
         )
         
         case 3: return .complete(userLocation: try FfiConverterTypeUserLocation.read(from: &buf), summary: try FfiConverterTypeTripSummary.read(from: &buf)
@@ -9177,7 +10239,7 @@ public struct FfiConverterTypeTripState: FfiConverterRustBuffer {
             FfiConverterOptionTypeUserLocation.write(userLocation, into: &buf)
             
         
-        case let .navigating(currentStepGeometryIndex,userLocation,snappedUserLocation,remainingSteps,remainingWaypoints,progress,summary,deviation,visualInstruction,spokenInstruction,annotationJson):
+        case let .navigating(currentStepGeometryIndex,userLocation,snappedUserLocation,remainingSteps,remainingWaypoints,progress,summary,deviation,visualInstruction,spokenInstruction,annotationJson,uzmatch):
             writeInt(&buf, Int32(2))
             FfiConverterOptionUInt64.write(currentStepGeometryIndex, into: &buf)
             FfiConverterTypeUserLocation.write(userLocation, into: &buf)
@@ -9190,6 +10252,7 @@ public struct FfiConverterTypeTripState: FfiConverterRustBuffer {
             FfiConverterOptionTypeVisualInstruction.write(visualInstruction, into: &buf)
             FfiConverterOptionTypeSpokenInstruction.write(spokenInstruction, into: &buf)
             FfiConverterOptionString.write(annotationJson, into: &buf)
+            FfiConverterOptionTypeUzmatchSnapshot.write(uzmatch, into: &buf)
             
         
         case let .complete(userLocation,summary):
@@ -9214,6 +10277,102 @@ public func FfiConverterTypeTripState_lift(_ buf: RustBuffer) throws -> TripStat
 #endif
 public func FfiConverterTypeTripState_lower(_ value: TripState) -> RustBuffer {
     return FfiConverterTypeTripState.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * Location accuracy class, mirroring vendor `LocationState`/`LocationClass`.
+ */
+
+public enum UzLocationClass: Equatable, Hashable, Codable {
+    
+    /**
+     * Fresh accurate fix.
+     */
+    case fine
+    /**
+     * No fine fix for [`EXACT_LOCATION_TIMEOUT`]; position is extrapolated.
+     */
+    case extrapolated
+    /**
+     * No fine fix for [`EXTRAPOLATED_LOCATION_TIMEOUT`]; only coarse signal.
+     */
+    case coarse
+    /**
+     * No usable signal for [`COARSE_LOCATION_TIMEOUT`]; location must not be shown.
+     */
+    case outdated
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension UzLocationClass: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeUzLocationClass: FfiConverterRustBuffer {
+    typealias SwiftType = UzLocationClass
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UzLocationClass {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .fine
+        
+        case 2: return .extrapolated
+        
+        case 3: return .coarse
+        
+        case 4: return .outdated
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: UzLocationClass, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .fine:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .extrapolated:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .coarse:
+            writeInt(&buf, Int32(3))
+        
+        
+        case .outdated:
+            writeInt(&buf, Int32(4))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeUzLocationClass_lift(_ buf: RustBuffer) throws -> UzLocationClass {
+    return try FfiConverterTypeUzLocationClass.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeUzLocationClass_lower(_ value: UzLocationClass) -> RustBuffer {
+    return FfiConverterTypeUzLocationClass.lower(value)
 }
 
 
@@ -10093,6 +11252,30 @@ fileprivate struct FfiConverterOptionTypeNavigationSessionSnapshot: FfiConverter
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionTypeRoutePosition: FfiConverterRustBuffer {
+    typealias SwiftType = RoutePosition?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeRoutePosition.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeRoutePosition.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionTypeSpeed: FfiConverterRustBuffer {
     typealias SwiftType = Speed?
 
@@ -10141,6 +11324,30 @@ fileprivate struct FfiConverterOptionTypeSpokenInstruction: FfiConverterRustBuff
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionTypeStreamedPosition: FfiConverterRustBuffer {
+    typealias SwiftType = StreamedPosition?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeStreamedPosition.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeStreamedPosition.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionTypeUserLocation: FfiConverterRustBuffer {
     typealias SwiftType = UserLocation?
 
@@ -10157,6 +11364,30 @@ fileprivate struct FfiConverterOptionTypeUserLocation: FfiConverterRustBuffer {
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterTypeUserLocation.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeUzmatchSnapshot: FfiConverterRustBuffer {
+    typealias SwiftType = UzmatchSnapshot?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeUzmatchSnapshot.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeUzmatchSnapshot.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }
@@ -10694,6 +11925,31 @@ fileprivate struct FfiConverterSequenceTypeRouteStep: FfiConverterRustBuffer {
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeRouteStep.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeSpeedSample: FfiConverterRustBuffer {
+    typealias SwiftType = [SpeedSample]
+
+    public static func write(_ value: [SpeedSample], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeSpeedSample.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [SpeedSample] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [SpeedSample]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeSpeedSample.read(from: &buf))
         }
         return seq
     }
@@ -11359,6 +12615,21 @@ private let initializationResult: InitializationResult = {
     if (uniffi_ferrostar_checksum_method_stepadvancecondition_new_instance() != 47605) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_ferrostar_checksum_method_routeboundstreamer_advance_to() != 40014) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_ferrostar_checksum_method_routeboundstreamer_is_available() != 21612) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_ferrostar_checksum_method_routeboundstreamer_on_route_bound_location() != 58585) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_ferrostar_checksum_method_routeboundstreamer_preview_at() != 28963) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_ferrostar_checksum_method_routeboundstreamer_reset() != 32386) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_ferrostar_checksum_method_navigationobserver_on_get_initial_state() != 20746) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -11441,6 +12712,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_ferrostar_checksum_constructor_navigationcontroller_new() != 20114) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_ferrostar_checksum_constructor_routeboundstreamer_new() != 3928) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_ferrostar_checksum_constructor_navigationsession_new() != 62800) {
