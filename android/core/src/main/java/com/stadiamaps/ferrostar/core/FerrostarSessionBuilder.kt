@@ -1,5 +1,6 @@
 package com.stadiamaps.ferrostar.core
 
+import uniffi.ferrostar.LocationClassState
 import uniffi.ferrostar.NavState
 import uniffi.ferrostar.NavigationCache
 import uniffi.ferrostar.NavigationCachingConfig
@@ -9,6 +10,9 @@ import uniffi.ferrostar.NavigationRecorder
 import uniffi.ferrostar.NavigationSession
 import uniffi.ferrostar.NavigationSessionCache
 import uniffi.ferrostar.Route
+import uniffi.ferrostar.StandingState
+import uniffi.ferrostar.UzLocationClass
+import uniffi.ferrostar.UzmatchState
 import uniffi.ferrostar.createNavigationSession
 
 /**
@@ -81,7 +85,19 @@ class FerrostarSessionBuilder(private var config: NavigationControllerConfig) {
     val tripState = record.tripState ?: throw NoCachedSession()
 
     val session = build(record.route)
-    val navState = NavState(tripState, this.config.stepAdvanceCondition)
+    val navState =
+      NavState(
+          tripState,
+          this.config.stepAdvanceCondition,
+          // Resumed sessions start the matching core fresh; standing and
+          // location-class state rebuild from incoming fixes within seconds.
+          UzmatchState(
+              standing = StandingState(oldestSignal = null, latestSignal = null, isStanding = false),
+              locationClass = LocationClassState(`class` = UzLocationClass.OUTDATED, since = null),
+              speedHistory = emptyList(),
+              routePosition = null,
+          ),
+      )
     return Triple(session, record.route, navState)
   }
 

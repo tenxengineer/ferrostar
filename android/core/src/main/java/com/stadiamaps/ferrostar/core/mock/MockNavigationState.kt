@@ -88,6 +88,7 @@ fun NavigationState.Companion.pedestrianExample(): NavigationState {
                   ),
               spokenInstruction = null,
               annotationJson = null,
+              uzmatch = null,
           ),
       routeGeometry = listOf(),
       isCalculatingNewRoute = false,

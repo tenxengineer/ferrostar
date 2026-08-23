@@ -168,6 +168,7 @@ class FerrostarCoreTest {
             stepAdvanceManual(),
             RouteDeviationTracking.None,
             CourseFiltering.RAW,
+            uzmatchDisabled,
         )
     val session = createNavigationSession(mockRoute, config, emptyList())
     val location =
@@ -209,6 +210,7 @@ class FerrostarCoreTest {
                     stepAdvanceManual(),
                     RouteDeviationTracking.None,
                     CourseFiltering.RAW,
+                    uzmatchDisabled,
                 ),
         )
 
@@ -269,6 +271,7 @@ class FerrostarCoreTest {
                     stepAdvanceManual(),
                     RouteDeviationTracking.None,
                     CourseFiltering.RAW,
+                    uzmatchDisabled,
                 ),
         )
     val routes =
@@ -324,6 +327,7 @@ class FerrostarCoreTest {
                     stepAdvanceManual(),
                     RouteDeviationTracking.None,
                     CourseFiltering.RAW,
+                    uzmatchDisabled,
                 ),
         )
     val routes =
@@ -386,6 +390,7 @@ class FerrostarCoreTest {
                     stepAdvanceManual(),
                     RouteDeviationTracking.None,
                     CourseFiltering.RAW,
+                    uzmatchDisabled,
                 ),
         )
     val routes =
@@ -469,6 +474,7 @@ class FerrostarCoreTest {
                     stepAdvanceManual(),
                     RouteDeviationTracking.None,
                     CourseFiltering.RAW,
+                    uzmatchDisabled,
                 ),
         )
 
@@ -524,6 +530,7 @@ class FerrostarCoreTest {
                         },
                 ),
             CourseFiltering.RAW,
+            uzmatchDisabled,
         ),
     )
 
@@ -549,6 +556,7 @@ class FerrostarCoreTest {
             stepAdvanceManual(),
             RouteDeviationTracking.None,
             CourseFiltering.RAW,
+            uzmatchDisabled,
         )
     val recorder = NavigationRecorder(mockRoute, config)
 

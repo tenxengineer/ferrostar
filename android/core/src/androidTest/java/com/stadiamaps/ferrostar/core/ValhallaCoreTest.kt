@@ -263,6 +263,7 @@ class ValhallaCoreTest {
                     stepAdvanceManual(),
                     RouteDeviationTracking.None,
                     CourseFiltering.RAW,
+                    uzmatchDisabled,
                 ),
         )
 
@@ -328,6 +329,7 @@ class ValhallaCoreTest {
                     stepAdvanceManual(),
                     RouteDeviationTracking.None,
                     CourseFiltering.RAW,
+                    uzmatchDisabled,
                 ),
         )
 
