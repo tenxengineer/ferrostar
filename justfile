@@ -14,3 +14,8 @@ preflight: bootstrap-remote
 test-common:
     cd common && cargo test -p ferrostar
     cd common && cargo test -p ferrostar --doc
+
+# Apple XCFramework into common/target/ios (oracle gate 4). Called by the
+# canonical pipeline (scripts/ferrostar/build-ios.sh) inside the source tree.
+build-ios:
+    cd common && zsh ./build-ios.sh
