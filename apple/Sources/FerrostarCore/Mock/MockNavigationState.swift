@@ -36,7 +36,8 @@ public extension NavigationState {
                 deviation: .noDeviation,
                 visualInstruction: nil,
                 spokenInstruction: nil,
-                annotationJson: nil
+                annotationJson: nil,
+                uzmatch: nil
             ),
             routeGeometry: samplePedestrianWaypoints,
             isCalculatingNewRoute: false
@@ -105,7 +106,8 @@ public extension NavigationState {
                 deviation: .noDeviation,
                 visualInstruction: nil,
                 spokenInstruction: nil,
-                annotationJson: nil
+                annotationJson: nil,
+                uzmatch: nil
             ),
             routeGeometry: samplePedestrianWaypoints,
             isCalculatingNewRoute: false

@@ -442,7 +442,8 @@ public protocol FerrostarCoreDelegate: AnyObject {
                 deviation: let deviation,
                 visualInstruction: let visualInstruction,
                 spokenInstruction: let spokenInstruction,
-                annotationJson: _
+                annotationJson: _,
+                uzmatch: _
             ):
                 switch deviation {
                 case .noDeviation:

@@ -75,7 +75,18 @@ public class FerrostarSessionBuilder {
 
         let route = snapshot.route
         let session = build(for: route)
-        let navState = NavState(tripState: tripState, stepAdvanceCondition: config.ffiValue.stepAdvanceCondition)
+        // Resumed sessions start the matching core fresh; standing and
+        // location-class state rebuild from incoming fixes within seconds.
+        let navState = NavState(
+            tripState: tripState,
+            stepAdvanceCondition: config.ffiValue.stepAdvanceCondition,
+            uzmatchState: UzmatchState(
+                standing: StandingState(oldestSignal: nil, latestSignal: nil, isStanding: false),
+                locationClass: LocationClassState(class: .outdated, since: nil),
+                speedHistory: [],
+                routePosition: nil
+            )
+        )
 
         return (session, route, navState)
     }

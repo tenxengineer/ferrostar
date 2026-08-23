@@ -24,7 +24,7 @@ extension TripState: CustomStringConvertible {
         switch self {
         case let .idle(userLocation):
             "idle: \(userLocation != nil ? "\(userLocation!.coordinates)" : "none")"
-        case let .navigating(_, _, snappedUserLocation, _, _, _, _, _, visualInstruction, _, _):
+        case let .navigating(_, _, snappedUserLocation, _, _, _, _, _, visualInstruction, _, _, _):
             "navigating: \(snappedUserLocation.coordinates) instruction: \(visualInstruction != nil ? visualInstruction!.primaryContent.text : "none")"
         case let .complete(userLocation, _):
             "complete: \(userLocation.coordinates)"
