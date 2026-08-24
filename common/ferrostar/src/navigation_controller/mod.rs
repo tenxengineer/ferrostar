@@ -28,9 +28,9 @@ use crate::{
 use chrono::Utc;
 use geo::geometry::LineString;
 use models::{NavState, NavigationControllerConfig, StepAdvanceStatus, TripState};
-use uzmatch::{UzmatchSnapshot, UzmatchState};
 use std::clone::Clone;
 use std::sync::Arc;
+use uzmatch::{RouteSnapIndex, UzmatchSnapshot, UzmatchState};
 #[cfg(feature = "wasm-bindgen")]
 use wasm_bindgen::{JsValue, prelude::wasm_bindgen};
 
@@ -83,6 +83,7 @@ pub fn create_navigator(
 pub struct NavigationController {
     route: Route,
     config: NavigationControllerConfig,
+    route_snap_index: Option<RouteSnapIndex>,
 }
 
 #[cfg_attr(feature = "uniffi", uniffi::export)]
@@ -90,7 +91,15 @@ impl NavigationController {
     #[cfg_attr(feature = "uniffi", uniffi::constructor)]
     /// Create a navigation controller for a route and configuration.
     pub fn new(route: Route, config: NavigationControllerConfig) -> Self {
-        Self { route, config }
+        let route_snap_index = config
+            .uzmatch
+            .enabled
+            .then(|| RouteSnapIndex::new(&route.geometry));
+        Self {
+            route,
+            config,
+            route_snap_index,
+        }
     }
 }
 
@@ -138,8 +147,8 @@ impl Navigator for NavigationController {
             .and_then(|index| current_route_step.get_annotation_at_current_index(index));
 
         // UzNav matching core: seed from the first location when enabled.
-        let mut uzmatch_state = if self.config.uzmatch.enabled {
-            UzmatchState::default().update(&location, &self.route, &self.config.uzmatch)
+        let mut uzmatch_state = if let Some(route_index) = &self.route_snap_index {
+            UzmatchState::default().update_with_index(&location, route_index, &self.config.uzmatch)
         } else {
             UzmatchState::default()
         };
@@ -319,36 +328,41 @@ impl Navigator for NavigationController {
                     .trip_state()
                     .deviation()
                     .unwrap_or(RouteDeviation::NoDeviation);
-                let (uzmatch_state, uzmatch_snapshot) = if self.config.uzmatch.enabled {
-                    let mut updated =
-                        state
-                            .uzmatch_state()
-                            .update(&location, &self.route, &self.config.uzmatch);
-                    let snapshot = updated.snapshot(location.timestamp);
-                    (updated, Some(snapshot))
-                } else {
-                    (state.uzmatch_state(), None)
-                };
+                let (uzmatch_state, uzmatch_snapshot) =
+                    if let Some(route_index) = &self.route_snap_index {
+                        let mut updated = state.uzmatch_state().update_with_index(
+                            &location,
+                            route_index,
+                            &self.config.uzmatch,
+                        );
+                        let snapshot = updated.snapshot(location.timestamp);
+                        (updated, Some(snapshot))
+                    } else {
+                        (state.uzmatch_state(), None)
+                    };
                 let is_standing = uzmatch_snapshot.as_ref().is_some_and(|s| s.is_standing);
 
-                let deviation = if is_standing {
-                    previous_deviation
-                } else {
-                    self.config
-                        .route_deviation_tracking
-                        .check_route_deviation(&self.route, &state.trip_state())
-                };
-
                 let is_arriving = remaining_steps.len() <= 2;
-                let intermediate_trip_state = self.create_intermediate_trip_state(
+                let mut intermediate_trip_state = self.create_intermediate_trip_state(
                     state.trip_state(),
                     location,
                     current_step,
                     remaining_steps,
                     remaining_waypoints,
-                    deviation,
+                    previous_deviation,
                     uzmatch_snapshot,
                 );
+
+                if !is_standing {
+                    let deviation = self
+                        .config
+                        .route_deviation_tracking
+                        .check_route_deviation(&self.route, &intermediate_trip_state);
+                    Self::apply_deviation_and_instruction_policy(
+                        &mut intermediate_trip_state,
+                        deviation,
+                    );
+                }
 
                 // Get the step advance condition result.
                 //
@@ -447,36 +461,10 @@ impl NavigationController {
                     &remaining_steps,
                 );
 
-                // Visual + spoken instructions are derived from the *snapped* distance to
-                // the next maneuver. When the user is completely off the route, that snap
-                // is geometrically unsound: a user laterally far from the route still
-                // projects onto it somewhere, and the resulting "distance to next maneuver"
-                // is the phantom snap's distance, not the user's. Surfacing instructions
-                // paced off that phantom distance produces wrong countdowns to maneuvers
-                // the user can't take from their current position. Suppress both while
-                // completely off-route — the deviation flag (and the consumer's own alert)
-                // is the right cue to surface; resume normal instruction emission on
-                // return. `OffStepOnRoute` is intentionally not suppressed: the user is
-                // still on the route polyline, and the step-advance flow will reconcile
-                // shortly. Apps that don't want any of this policy can configure
-                // `RouteDeviationTracking::None`.
-                let (visual_instruction, spoken_instruction) =
-                    if deviation.is_completely_off_route() {
-                        (None, None)
-                    } else {
-                        (
-                            current_step
-                                .get_active_visual_instruction(progress.distance_to_next_maneuver)
-                                .cloned(),
-                            current_step
-                                .get_current_spoken_instruction(progress.distance_to_next_maneuver)
-                                .cloned(),
-                        )
-                    };
                 let annotation_json = current_step_geometry_index
                     .and_then(|index| current_step.get_annotation_at_current_index(index));
 
-                TripState::Navigating {
+                let mut intermediate_trip_state = TripState::Navigating {
                     current_step_geometry_index,
                     user_location: current_user_location,
                     snapped_user_location,
@@ -485,14 +473,60 @@ impl NavigationController {
                     progress,
                     summary: updated_summary,
                     deviation,
-                    visual_instruction,
-                    spoken_instruction,
+                    visual_instruction: None,
+                    spoken_instruction: None,
                     annotation_json,
                     uzmatch,
-                }
+                };
+                Self::apply_deviation_and_instruction_policy(
+                    &mut intermediate_trip_state,
+                    deviation,
+                );
+                intermediate_trip_state
             }
             // Pass through
             TripState::Idle { .. } | TripState::Complete { .. } => trip_state,
+        }
+    }
+
+    /// Apply route deviation and derive guidance from the same updated trip state.
+    ///
+    /// A completely off-route location must not emit instructions paced from its
+    /// phantom snapped point. `OffStepOnRoute` remains eligible because the user is
+    /// still on the route and step advance will reconcile it.
+    fn apply_deviation_and_instruction_policy(
+        trip_state: &mut TripState,
+        new_deviation: RouteDeviation,
+    ) {
+        let TripState::Navigating {
+            remaining_steps,
+            progress,
+            deviation,
+            visual_instruction,
+            spoken_instruction,
+            ..
+        } = trip_state
+        else {
+            return;
+        };
+
+        *deviation = new_deviation;
+        let Some(current_step) = remaining_steps.first() else {
+            *visual_instruction = None;
+            *spoken_instruction = None;
+            return;
+        };
+
+        if new_deviation.is_completely_off_route() {
+            *visual_instruction = None;
+            *spoken_instruction = None;
+        } else {
+            *visual_instruction = current_step
+                .get_active_visual_instruction(progress.distance_to_next_maneuver)
+                .cloned();
+            *spoken_instruction = current_step
+                .get_current_spoken_instruction(progress.distance_to_next_maneuver)
+                .cloned();
         }
     }
 
@@ -610,11 +644,11 @@ mod tests {
         SerializableStepAdvanceCondition, StepAdvanceCondition, StepAdvanceResult,
         kan_69_test_condition_with_candidate,
     };
-    use crate::navigation_controller::uzmatch::{UzmatchConfig, UzmatchState};
     use crate::navigation_controller::test_helpers::{
         gen_dummy_route_step, gen_route_from_steps, get_test_navigation_controller_config,
         nav_controller_insta_settings,
     };
+    use crate::navigation_controller::uzmatch::{UzmatchConfig, UzmatchState};
     use crate::routing_adapters::osrm::models::OsrmWaypointProperties;
     use crate::simulation::{
         LocationBias, advance_location_simulation, location_simulation_from_route,
@@ -1237,18 +1271,11 @@ mod tests {
         // Offset by ~0.5° (~55 km) so the location is unambiguously far from every step
         // in the route, regardless of where the route winds. The deviation check scans all
         // remaining steps and returns NoDeviation if the user is close to any of them.
-        //
-        // Note: `update_user_location` computes deviation against the *previous* trip
-        // state's user_location (mod.rs:289), so the deviation flag lags one tick. The
-        // first off-route update therefore still reports NoDeviation; the second flips it
-        // to `Deviation { kind: CompletelyOffRoute }` (the user is 55km from every step),
-        // and that is when instruction suppression activates.
         let off_route_loc = make_user_location(
             coord!(x: start_coord.lng + 0.5, y: start_coord.lat + 0.5),
             5.0,
         );
-        let off_state_lagged = controller.update_user_location(off_route_loc.clone(), initial);
-        let off_state = controller.update_user_location(off_route_loc, off_state_lagged);
+        let off_state = controller.update_user_location(off_route_loc, initial);
         match off_state.trip_state() {
             TripState::Navigating {
                 deviation,
@@ -1258,7 +1285,7 @@ mod tests {
             } => {
                 assert!(
                     deviation.is_completely_off_route(),
-                    "expected CompletelyOffRoute on second off-route tick, got {deviation:?}"
+                    "expected CompletelyOffRoute on the current off-route tick, got {deviation:?}"
                 );
                 assert!(
                     visual_instruction.is_none(),
@@ -1272,11 +1299,8 @@ mod tests {
             other => panic!("expected Navigating, got {other:?}"),
         };
 
-        // 3. Update back to the on-route location. The first return tick still carries
-        // the lagged CompletelyOffRoute flag (deviation is computed from the previous
-        // user_location, which was off-route), so update twice to clear the lag.
-        let recovered_lagged = controller.update_user_location(on_route_loc.clone(), off_state);
-        let recovered = controller.update_user_location(on_route_loc, recovered_lagged);
+        // 3. A single current on-route fix clears deviation and resumes instructions.
+        let recovered = controller.update_user_location(on_route_loc, off_state);
         match recovered.trip_state() {
             TripState::Navigating {
                 deviation,
@@ -1473,7 +1497,9 @@ mod tests {
         };
 
         let remaining = |state: &NavState| match state.trip_state() {
-            TripState::Navigating { remaining_steps, .. } => remaining_steps.len(),
+            TripState::Navigating {
+                remaining_steps, ..
+            } => remaining_steps.len(),
             other => panic!("expected Navigating, got {other:?}"),
         };
 

@@ -509,11 +509,15 @@ public protocol FerrostarCoreDelegate: AnyObject {
                     // Otherwise we'll ignore it.
                     spokenInstructionToAlert = spokenInstruction
 
-                    // This should not happen on the main queue as it can block;
-                    // we'll probably remove the need for this eventually
-                    // by making FerrostarCore its own actor
+                    let transformedInstruction = self.spokenInstructionObserver.transformInstruction(
+                        spokenInstruction,
+                        tripState: state.tripState
+                    )
+
+                    // Audio focus and speech synthesis stay off the main queue. The client
+                    // transform above runs on MainActor with the state update that triggered it.
                     DispatchQueue.global(qos: .default).async {
-                        self.spokenInstructionObserver.spokenInstructionTriggered(spokenInstruction)
+                        self.spokenInstructionObserver.spokenInstructionTriggered(transformedInstruction)
                     }
                 }
 

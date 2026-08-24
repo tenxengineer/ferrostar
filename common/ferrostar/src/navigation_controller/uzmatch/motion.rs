@@ -111,7 +111,11 @@ impl OneDimensionalMotion {
     pub fn new(initial_speed: f64, final_speed: f64, duration: f64, distance: f64) -> Self {
         debug_assert!(duration > 0.0);
         debug_assert!(distance >= 0.0);
-        if !(duration > 0.0) || distance < 0.0 || !initial_speed.is_finite() || !final_speed.is_finite() {
+        if !(duration > 0.0)
+            || distance < 0.0
+            || !initial_speed.is_finite()
+            || !final_speed.is_finite()
+        {
             return Self::default();
         }
 
@@ -170,10 +174,7 @@ impl OneDimensionalMotion {
         if !time.is_finite() || time < 0.0 {
             return self.points[0];
         }
-        let next_index = self
-            .points
-            .iter()
-            .position(|p| p.time >= time);
+        let next_index = self.points.iter().position(|p| p.time >= time);
 
         match next_index {
             Some(0) => self.points[0],
@@ -270,31 +271,35 @@ impl RouteBoundStreamer {
 
     /// Supply a fresh route-bound location (vendor `BoundMotion::supplyLocation`
     /// with the constructor delay check folded in for the first fix).
-    pub fn on_route_bound_location(&self, location: UserLocation, distance_along_route_meters: f64) {
+    pub fn on_route_bound_location(
+        &self,
+        location: UserLocation,
+        distance_along_route_meters: f64,
+    ) {
         let mut inner = match self.inner.lock() {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         };
 
         match inner.motion.take() {
+            Some(mut state) if state.available => {
+                supply_location(&mut state, location, distance_along_route_meters);
+                inner.motion = Some(state);
+            }
             None => {
-                inner.motion = Some(BoundMotionState {
-                    current_distance: distance_along_route_meters,
-                    current_timestamp: location.timestamp,
-                    motion: OneDimensionalMotion::default(),
-                    point: MotionPoint {
-                        time: 0.0,
-                        distance: 0.0,
-                        speed: location.speed.map(|s| s.value).unwrap_or(0.0),
-                    },
-                    available: true,
-                });
+                // Seed the first fix or recover after a rejected interpolation. The next
+                // route-bound fix is a new trustworthy anchor; without reseeding, one GPS
+                // gap would disable smoothing for the rest of the route.
+                inner.motion = Some(initial_motion_state(location, distance_along_route_meters));
                 inner.last_tick = None;
             }
-            Some(mut state) => {
-                if state.available {
-                    supply_location(&mut state, location, distance_along_route_meters);
-                }
+            Some(state) if location.timestamp > state.current_timestamp => {
+                inner.motion = Some(initial_motion_state(location, distance_along_route_meters));
+                inner.last_tick = None;
+            }
+            Some(state) => {
+                // Keep the newest rejected state's timestamp. Otherwise a second delayed
+                // fix could reseed motion from an even older route position.
                 inner.motion = Some(state);
             }
         }
@@ -328,7 +333,9 @@ impl RouteBoundStreamer {
         let state = motion.as_mut()?;
         if state.available {
             let previous_point = state.point;
-            state.point = state.motion.point(state.point.time + advancement.as_secs_f64());
+            state.point = state
+                .motion
+                .point(state.point.time + advancement.as_secs_f64());
             let distance = (state.point.distance - previous_point.distance).max(0.0);
             state.current_distance += distance;
             state.current_timestamp += advancement;
@@ -368,7 +375,9 @@ impl RouteBoundStreamer {
         }
 
         let (distance, speed) = if state.available {
-            let point = state.motion.point(state.point.time + advancement.as_secs_f64());
+            let point = state
+                .motion
+                .point(state.point.time + advancement.as_secs_f64());
             (
                 state.current_distance + (point.distance - state.point.distance).max(0.0),
                 Some(point.speed),
@@ -400,6 +409,20 @@ impl RouteBoundStreamer {
             inner.motion = None;
             inner.last_tick = None;
         }
+    }
+}
+
+fn initial_motion_state(location: UserLocation, route_distance: f64) -> BoundMotionState {
+    BoundMotionState {
+        current_distance: route_distance,
+        current_timestamp: location.timestamp,
+        motion: OneDimensionalMotion::default(),
+        point: MotionPoint {
+            time: 0.0,
+            distance: 0.0,
+            speed: location.speed.map(|s| s.value).unwrap_or(0.0),
+        },
+        available: true,
     }
 }
 
@@ -443,7 +466,8 @@ fn supply_location(state: &mut BoundMotionState, location: UserLocation, route_d
     }
 
     let new_speed = location.speed.map(|s| s.value).unwrap_or(0.0);
-    state.motion = OneDimensionalMotion::new(state.point.speed, new_speed, interval.as_secs_f64(), path);
+    state.motion =
+        OneDimensionalMotion::new(state.point.speed, new_speed, interval.as_secs_f64(), path);
     state.point = state.motion.point(0.0);
 }
 
@@ -468,7 +492,10 @@ mod tests {
         Route {
             bbox: crate::models::BoundingBox {
                 sw: GeographicCoordinate { lat: 0.0, lng: 0.0 },
-                ne: GeographicCoordinate { lat: 0.0, lng: 0.001 },
+                ne: GeographicCoordinate {
+                    lat: 0.0,
+                    lng: 0.001,
+                },
             },
             distance: 111.0,
             waypoints: vec![],
@@ -485,7 +512,10 @@ mod tests {
             let t = i as f64 * 0.02;
             let p = motion.point(t);
             assert!(p.time >= last.time);
-            assert!(p.distance >= last.distance - 1e-9, "distance must be non-decreasing");
+            assert!(
+                p.distance >= last.distance - 1e-9,
+                "distance must be non-decreasing"
+            );
             last = p;
         }
         let end = motion.point(2.0);
@@ -531,7 +561,9 @@ mod tests {
         // between the two fixes.
         let rendered = streamer.advance_to(at(1)).unwrap();
         assert!(rendered.distance_along_route_meters >= 0.0);
-        let halfway = streamer.advance_to(at(1) + Duration::from_millis(500)).unwrap();
+        let halfway = streamer
+            .advance_to(at(1) + Duration::from_millis(500))
+            .unwrap();
         assert!(halfway.distance_along_route_meters > rendered.distance_along_route_meters);
         assert!(halfway.distance_along_route_meters <= seg_len + 1.0);
     }
@@ -556,6 +588,56 @@ mod tests {
             100.0,
         );
         assert!(!streamer.is_available());
+
+        // The rejected interpolation must not poison the route lifetime. A
+        // subsequent route-bound fix becomes a fresh anchor.
+        streamer.on_route_bound_location(
+            UserLocation {
+                timestamp: at(4),
+                ..make_user_location(coord!(x: 0.0011, y: 0.0), 5.0)
+            },
+            110.0,
+        );
+        assert!(streamer.is_available());
+        let recovered = streamer
+            .advance_to(at(4))
+            .expect("fresh fix must recover motion");
+        assert!((recovered.distance_along_route_meters - 110.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn streamer_does_not_recover_from_a_second_out_of_order_fix() {
+        let route = test_route();
+        let streamer = RouteBoundStreamer::new(&route);
+        streamer.on_route_bound_location(
+            UserLocation {
+                timestamp: at(10),
+                ..make_user_location(coord!(x: 0.001, y: 0.0), 5.0)
+            },
+            100.0,
+        );
+        streamer.on_route_bound_location(
+            UserLocation {
+                timestamp: at(8),
+                ..make_user_location(coord!(x: 0.0008, y: 0.0), 5.0)
+            },
+            80.0,
+        );
+        assert!(!streamer.is_available());
+
+        streamer.on_route_bound_location(
+            UserLocation {
+                timestamp: at(9),
+                ..make_user_location(coord!(x: 0.0009, y: 0.0), 5.0)
+            },
+            90.0,
+        );
+
+        assert!(!streamer.is_available());
+        let position = streamer
+            .advance_to(at(10))
+            .expect("the last reliable anchor remains renderable");
+        assert!((position.distance_along_route_meters - 100.0).abs() < 1e-6);
     }
 
     #[test]
@@ -631,7 +713,9 @@ mod tests {
 
         // The preview must not have advanced the rendered position: a real tick
         // at the same instant still animates from the motion start.
-        let rendered = streamer.advance_to(at(1) + Duration::from_millis(500)).unwrap();
+        let rendered = streamer
+            .advance_to(at(1) + Duration::from_millis(500))
+            .unwrap();
         assert!(
             rendered.distance_along_route_meters < seg_len,
             "tick after preview must still be mid-motion, got {}",

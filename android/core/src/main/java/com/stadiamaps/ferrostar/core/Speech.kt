@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import uniffi.ferrostar.SpokenInstruction
+import uniffi.ferrostar.TripState
 
 interface SpokenInstructionObserver {
 
@@ -24,6 +25,19 @@ interface SpokenInstructionObserver {
    * function will never be called twice for the same instruction during a navigation session.
    */
   fun onSpokenInstructionTrigger(spokenInstruction: SpokenInstruction)
+
+  /**
+   * Handles a spoken instruction together with the exact trip state that triggered it.
+   *
+   * The default keeps existing observers source-compatible. Observers that need structured
+   * maneuver data can override this method instead of racing the separately published core state.
+   */
+  fun onSpokenInstructionTrigger(
+      spokenInstruction: SpokenInstruction,
+      tripState: TripState,
+  ) {
+    onSpokenInstructionTrigger(spokenInstruction)
+  }
 
   /** Stops speech and clears the queue of spoken utterances. */
   fun stopAndClearQueue()

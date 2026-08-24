@@ -8,10 +8,17 @@ import Foundation
 /// Automatically handles audio session management,
 /// including ducking volume from other apps when appropriate.
 public class SpokenInstructionObserver {
+    /// Runs on ``MainActor`` before Ferrostar dispatches audio work.
+    public typealias InstructionTransform = (
+        FerrostarCoreFFI.SpokenInstruction,
+        FerrostarCoreFFI.TripState
+    ) -> FerrostarCoreFFI.SpokenInstruction
+
     @Published public private(set) var isMuted: Bool
 
     let synthesizer: SpeechSynthesizer
     private let audioManager = AudioSessionManager()
+    private let instructionTransform: InstructionTransform
     private var audioFocusReleaseTask: Task<Void, Never>?
 
     /// Creates a spoken instruction observer with any ``SpeechSynthesizer``.
@@ -21,10 +28,12 @@ public class SpokenInstructionObserver {
     ///   - isMuted: Whether the speech synthesizer is currently muted. Assume false if unknown.
     public init(
         synthesizer: SpeechSynthesizer,
-        isMuted: Bool
+        isMuted: Bool,
+        instructionTransform: @escaping InstructionTransform = { instruction, _ in instruction }
     ) {
         self.synthesizer = synthesizer
         self.isMuted = isMuted
+        self.instructionTransform = instructionTransform
     }
 
     deinit {
@@ -53,6 +62,25 @@ public class SpokenInstructionObserver {
             self.synthesizer.speak(utterance)
             scheduleAudioFocusRelease()
         }
+    }
+
+    /// Handles an instruction with the exact trip state that triggered it.
+    ///
+    /// This keeps maneuver, distance, and utterance identity atomic for clients that generate
+    /// localized prompts from structured guidance. The one-argument method remains available for
+    /// event announcements and existing integrations.
+    @MainActor public func spokenInstructionTriggered(
+        _ instruction: FerrostarCoreFFI.SpokenInstruction,
+        tripState: FerrostarCoreFFI.TripState
+    ) {
+        spokenInstructionTriggered(transformInstruction(instruction, tripState: tripState))
+    }
+
+    @MainActor func transformInstruction(
+        _ instruction: FerrostarCoreFFI.SpokenInstruction,
+        tripState: FerrostarCoreFFI.TripState
+    ) -> FerrostarCoreFFI.SpokenInstruction {
+        instructionTransform(instruction, tripState)
     }
 
     /// Toggle the mute.

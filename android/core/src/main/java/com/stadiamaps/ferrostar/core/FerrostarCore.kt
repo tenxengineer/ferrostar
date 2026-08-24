@@ -435,7 +435,10 @@ class FerrostarCore(
       if (tripState.spokenInstruction != null) {
         if (!_queuedUtteranceIds.contains(tripState.spokenInstruction.utteranceId)) {
           _queuedUtteranceIds.add(tripState.spokenInstruction.utteranceId)
-          spokenInstructionObserver?.onSpokenInstructionTrigger(tripState.spokenInstruction)
+          spokenInstructionObserver?.onSpokenInstructionTrigger(
+              tripState.spokenInstruction,
+              tripState,
+          )
         }
       }
     }

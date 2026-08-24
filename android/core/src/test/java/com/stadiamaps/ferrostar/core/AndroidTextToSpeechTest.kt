@@ -13,12 +13,14 @@ import java.util.UUID
 import junit.framework.TestCase.assertFalse
 import junit.framework.TestCase.assertNotNull
 import junit.framework.TestCase.assertNull
+import junit.framework.TestCase.assertSame
 import junit.framework.TestCase.assertTrue
 import kotlin.uuid.ExperimentalUuidApi
 import kotlinx.coroutines.test.runTest
 import org.junit.Before
 import org.junit.Test
 import uniffi.ferrostar.SpokenInstruction
+import uniffi.ferrostar.TripState
 
 class AndroidTextToSpeechTest {
 
@@ -57,6 +59,28 @@ class AndroidTextToSpeechTest {
 
     verify { tts.shutdown() }
     assertNull(androidTts.tts)
+  }
+
+  @Test
+  fun `structured callback remains compatible with instruction-only observer`() {
+    val instruction = mockk<SpokenInstruction>()
+    var received: SpokenInstruction? = null
+    val observer =
+        object : SpokenInstructionObserver {
+          override val muteState = kotlinx.coroutines.flow.MutableStateFlow(false)
+
+          override fun onSpokenInstructionTrigger(spokenInstruction: SpokenInstruction) {
+            received = spokenInstruction
+          }
+
+          override fun stopAndClearQueue() = Unit
+
+          override fun setMuted(isMuted: Boolean) = Unit
+        }
+
+    observer.onSpokenInstructionTrigger(instruction, TripState.Idle(userLocation = null))
+
+    assertSame(instruction, received)
   }
 
   @Test

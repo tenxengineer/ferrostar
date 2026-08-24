@@ -507,6 +507,7 @@ dependencies = [
  "polyline",
  "proptest",
  "rand 0.10.1",
+ "rstar",
  "rstest",
  "serde",
  "serde-wasm-bindgen",

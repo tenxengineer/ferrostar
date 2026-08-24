@@ -8,11 +8,19 @@
 //! `IGNORE_HEADING_WHEN_SLOWER` mechanism; UzNav default 4.0 m/s).
 
 use geo::{Bearing, Coord, Distance, Geodesic, Haversine, Point};
+use rstar::{AABB, RTree, RTreeObject};
 use serde::{Deserialize, Serialize};
 
 use crate::models::{CourseOverGround, GeographicCoordinate, UserLocation};
 
 use super::UzmatchConfig;
+
+/// Vendor `MAX_ROUTE_LOCATION_BIAS`: segments outside this distance cannot
+/// become route-binding candidates.
+const MAX_ROUTE_LOCATION_BIAS_METERS: f64 = 200.0;
+/// Conservative lower bound for meters per degree used only to build a query
+/// envelope. Exact candidate distances are still measured with Haversine.
+const METERS_PER_DEGREE: f64 = 110_000.0;
 
 /// The user's position on the route polyline, route-global.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -59,90 +67,186 @@ struct SegmentCandidate {
     bearing: f64,
 }
 
-/// Snap `location` to the route polyline, scoring each segment by a Gaussian
-/// geometric emission (sigma = `snap_position_stddev_m`) multiplied by a
-/// Gaussian heading emission (sigma = `snap_heading_stddev_deg`) when the
-/// user's speed is at least `snap_heading_min_speed_mps` and a course is
-/// available.
+#[derive(Debug, Clone, Copy)]
+struct IndexedSegment {
+    start: Coord,
+    delta_x: f64,
+    delta_y: f64,
+    length_squared: f64,
+    length_meters: f64,
+    distance_from_route_start: f64,
+    bearing: f64,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SegmentEnvelope {
+    index: usize,
+    envelope: AABB<[f64; 2]>,
+}
+
+impl RTreeObject for SegmentEnvelope {
+    type Envelope = AABB<[f64; 2]>;
+
+    fn envelope(&self) -> Self::Envelope {
+        self.envelope
+    }
+}
+
+/// Route-lifetime spatial index for heading-aware snapping.
 ///
-/// Returns `None` when the route has fewer than two vertices.
-pub(crate) fn snap_to_route(
-    location: &UserLocation,
-    coords: &[GeographicCoordinate],
-    cum: &[f64],
-    config: &UzmatchConfig,
-) -> Option<RoutePosition> {
-    if coords.len() < 2 {
-        return None;
+/// `NaviKit`'s `IndexedRoute` owns the equivalent route index. Keeping it on the
+/// controller avoids rebuilding cumulative lengths, segment bearings and the
+/// spatial search tree for every GPS fix.
+pub(crate) struct RouteSnapIndex {
+    segments: Vec<IndexedSegment>,
+    tree: RTree<SegmentEnvelope>,
+}
+
+impl RouteSnapIndex {
+    pub(crate) fn new(coords: &[GeographicCoordinate]) -> Self {
+        let mut distance_from_route_start = 0.0;
+        let mut segments = Vec::with_capacity(coords.len().saturating_sub(1));
+        let mut envelopes = Vec::with_capacity(coords.len().saturating_sub(1));
+
+        for (index, pair) in coords.windows(2).enumerate() {
+            let start = Coord::from(pair[0]);
+            let end = Coord::from(pair[1]);
+            let delta_x = end.x - start.x;
+            let delta_y = end.y - start.y;
+            let length_meters = Haversine.distance(Point::from(start), Point::from(end));
+            let bearing = Geodesic
+                .bearing(Point::from(start), Point::from(end))
+                .rem_euclid(360.0);
+
+            segments.push(IndexedSegment {
+                start,
+                delta_x,
+                delta_y,
+                length_squared: delta_x * delta_x + delta_y * delta_y,
+                length_meters,
+                distance_from_route_start,
+                bearing,
+            });
+            envelopes.push(SegmentEnvelope {
+                index,
+                envelope: AABB::from_corners(
+                    [start.x.min(end.x), start.y.min(end.y)],
+                    [start.x.max(end.x), start.y.max(end.y)],
+                ),
+            });
+            distance_from_route_start += length_meters;
+        }
+
+        Self {
+            segments,
+            tree: RTree::bulk_load(envelopes),
+        }
     }
 
-    let user_point = Point::from(Coord::from(location.coordinates));
-    let user_course = location.course_over_ground.map(|c| c.degrees as f64);
-    let use_heading = location
-        .speed
-        .map(|s| s.value >= config.snap_heading_min_speed_mps)
-        .unwrap_or(false)
-        && user_course.is_some();
+    pub(crate) fn snap_to_route(
+        &self,
+        location: &UserLocation,
+        config: &UzmatchConfig,
+    ) -> Option<RoutePosition> {
+        if self.segments.is_empty()
+            || !location.coordinates.lat.is_finite()
+            || !location.coordinates.lng.is_finite()
+        {
+            return None;
+        }
 
-    let mut best: Option<SegmentCandidate> = None;
+        let user_point = Point::from(Coord::from(location.coordinates));
+        let user_course = location.course_over_ground.map(|c| f64::from(c.degrees));
+        let use_heading = location
+            .speed
+            .is_some_and(|s| s.value >= config.snap_heading_min_speed_mps)
+            && user_course.is_some();
 
-    for (index, pair) in coords.windows(2).enumerate() {
-        let a = Coord::from(pair[0]);
-        let b = Coord::from(pair[1]);
-        let ab_x = b.x - a.x;
-        let ab_y = b.y - a.y;
-        let len_sq = ab_x * ab_x + ab_y * ab_y;
+        let mut candidate_indices = self.candidate_indices(location.coordinates);
+        // R-tree iteration order is intentionally unspecified. Route order makes
+        // equal-score selection deterministic and preserves the old first-win rule.
+        candidate_indices.sort_unstable();
 
-        // Planar projection fraction along the segment (degrees space; the
-        // metric correction happens via haversine below).
-        let t = if len_sq > f64::EPSILON {
-            let ap_x = user_point.x() - a.x;
-            let ap_y = user_point.y() - a.y;
-            ((ap_x * ab_x + ap_y * ab_y) / len_sq).clamp(0.0, 1.0)
+        let mut best: Option<SegmentCandidate> = None;
+        for index in candidate_indices {
+            let segment = self.segments[index];
+            let t = if segment.length_squared > f64::EPSILON {
+                let ap_x = user_point.x() - segment.start.x;
+                let ap_y = user_point.y() - segment.start.y;
+                ((ap_x * segment.delta_x + ap_y * segment.delta_y) / segment.length_squared)
+                    .clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            let projection = Coord {
+                x: segment.start.x + t * segment.delta_x,
+                y: segment.start.y + t * segment.delta_y,
+            };
+            let distance_meters = Haversine.distance(user_point, Point::from(projection));
+            if distance_meters > MAX_ROUTE_LOCATION_BIAS_METERS {
+                continue;
+            }
+
+            let mut score = -0.5 * (distance_meters / config.snap_position_stddev_m).powi(2);
+            if use_heading {
+                let delta = heading_difference(user_course.unwrap_or(0.0), segment.bearing);
+                score += -0.5 * (delta / config.snap_heading_stddev_deg).powi(2);
+            }
+
+            let offset_meters = t * segment.length_meters;
+            let candidate = SegmentCandidate {
+                score,
+                segment_index: index,
+                offset_meters,
+                distance_along_route: segment.distance_from_route_start + offset_meters,
+                snapped: GeographicCoordinate {
+                    lat: projection.y,
+                    lng: projection.x,
+                },
+                bearing: segment.bearing,
+            };
+
+            if best
+                .as_ref()
+                .is_none_or(|current| candidate.score > current.score)
+            {
+                best = Some(candidate);
+            }
+        }
+
+        best.map(|candidate| RoutePosition {
+            segment_index: candidate.segment_index as u64,
+            segment_offset_meters: candidate.offset_meters,
+            distance_along_route_meters: candidate.distance_along_route,
+            coordinates: candidate.snapped,
+            course_over_ground: Some(CourseOverGround::new(candidate.bearing, None)),
+        })
+    }
+
+    fn candidate_indices(&self, point: GeographicCoordinate) -> Vec<usize> {
+        let latitude_delta = MAX_ROUTE_LOCATION_BIAS_METERS / METERS_PER_DEGREE;
+        let longitude_scale = point.lat.to_radians().cos().abs();
+        let longitude_delta = if longitude_scale <= f64::EPSILON {
+            180.0
         } else {
-            0.0
+            (MAX_ROUTE_LOCATION_BIAS_METERS / (METERS_PER_DEGREE * longitude_scale)).min(180.0)
         };
-        let proj = Coord {
-            x: a.x + t * ab_x,
-            y: a.y + t * ab_y,
-        };
-        let proj_point = Point::from(proj);
-        let distance_m = Haversine.distance(user_point, proj_point);
 
-        let mut score = -0.5 * (distance_m / config.snap_position_stddev_m).powi(2);
-
-        let bearing = Geodesic.bearing(Point::from(a), Point::from(b)).rem_euclid(360.0);
-        if use_heading {
-            let delta = heading_difference(user_course.unwrap_or(0.0), bearing);
-            score += -0.5 * (delta / config.snap_heading_stddev_deg).powi(2);
+        // A Cartesian longitude envelope cannot wrap around the antimeridian.
+        // Falling back to all segments there is rare and preserves correctness.
+        if point.lng - longitude_delta < -180.0 || point.lng + longitude_delta > 180.0 {
+            return (0..self.segments.len()).collect();
         }
 
-        let segment_length = Haversine.distance(Point::from(a), Point::from(b));
-        let offset_meters = t * segment_length;
-        let candidate = SegmentCandidate {
-            score,
-            segment_index: index,
-            offset_meters,
-            distance_along_route: cum.get(index).copied().unwrap_or(0.0) + offset_meters,
-            snapped: GeographicCoordinate {
-                lat: proj.y,
-                lng: proj.x,
-            },
-            bearing,
-        };
-
-        if best.as_ref().is_none_or(|b| candidate.score > b.score) {
-            best = Some(candidate);
-        }
+        let envelope = AABB::from_corners(
+            [point.lng - longitude_delta, point.lat - latitude_delta],
+            [point.lng + longitude_delta, point.lat + latitude_delta],
+        );
+        self.tree
+            .locate_in_envelope_intersecting(&envelope)
+            .map(|segment| segment.index)
+            .collect()
     }
-
-    best.map(|c| RoutePosition {
-        segment_index: c.segment_index as u64,
-        segment_offset_meters: c.offset_meters,
-        distance_along_route_meters: c.distance_along_route,
-        coordinates: c.snapped,
-        course_over_ground: Some(CourseOverGround::new(c.bearing, None)),
-    })
 }
 
 /// Interpolate the coordinate and bearing at an absolute route distance.
@@ -157,7 +261,9 @@ pub(crate) fn point_at_distance(
     }
     let clamped = distance.clamp(0.0, cum.last().copied().unwrap_or(0.0));
     // Binary search for the segment containing `clamped`.
-    let index = match cum.binary_search_by(|v| v.partial_cmp(&clamped).unwrap_or(std::cmp::Ordering::Equal)) {
+    let index = match cum
+        .binary_search_by(|v| v.partial_cmp(&clamped).unwrap_or(std::cmp::Ordering::Equal))
+    {
         Ok(i) => i.min(coords.len() - 2),
         Err(i) => i.saturating_sub(1).min(coords.len() - 2),
     };
@@ -170,7 +276,9 @@ pub(crate) fn point_at_distance(
         lat: a.y + t * (b.y - a.y),
         lng: a.x + t * (b.x - a.x),
     };
-    let bearing = Geodesic.bearing(Point::from(a), Point::from(b)).rem_euclid(360.0);
+    let bearing = Geodesic
+        .bearing(Point::from(a), Point::from(b))
+        .rem_euclid(360.0);
     Some((point, Some(bearing)))
 }
 
@@ -185,11 +293,23 @@ mod tests {
         UzmatchConfig::default()
     }
 
+    fn snap_to_route(
+        location: &UserLocation,
+        coords: &[GeographicCoordinate],
+        _cumulative_lengths: &[f64],
+        config: &UzmatchConfig,
+    ) -> Option<RoutePosition> {
+        RouteSnapIndex::new(coords).snap_to_route(location, config)
+    }
+
     fn route_coords() -> Vec<GeographicCoordinate> {
         // Straight east-west route along lat 0.
         vec![
             GeographicCoordinate { lat: 0.0, lng: 0.0 },
-            GeographicCoordinate { lat: 0.0, lng: 0.01 },
+            GeographicCoordinate {
+                lat: 0.0,
+                lng: 0.01,
+            },
         ]
     }
 
@@ -221,7 +341,10 @@ mod tests {
         // (~11 m apart): a self-overlapping parallel carriageway.
         let coords = vec![
             GeographicCoordinate { lat: 0.0, lng: 0.0 },
-            GeographicCoordinate { lat: 0.0, lng: 0.01 },
+            GeographicCoordinate {
+                lat: 0.0,
+                lng: 0.01,
+            },
             GeographicCoordinate {
                 lat: 0.0001,
                 lng: 0.01,
@@ -249,7 +372,10 @@ mod tests {
             ..make_user_location(coord!(x: 0.0, y: 0.0), 5.0)
         };
         let position = snap_to_route(&loc, &coords, &cum, &config).unwrap();
-        assert_eq!(position.segment_index, 0, "eastbound heading must pick the eastbound carriageway");
+        assert_eq!(
+            position.segment_index, 0,
+            "eastbound heading must pick the eastbound carriageway"
+        );
 
         // Same geometry, moving WEST (270 deg) -> segment 2.
         let loc_west = UserLocation {
@@ -257,14 +383,20 @@ mod tests {
             ..loc
         };
         let position = snap_to_route(&loc_west, &coords, &cum, &config).unwrap();
-        assert_eq!(position.segment_index, 2, "westbound heading must pick the westbound carriageway");
+        assert_eq!(
+            position.segment_index, 2,
+            "westbound heading must pick the westbound carriageway"
+        );
     }
 
     #[test]
     fn heading_ignored_below_min_speed() {
         let coords = vec![
             GeographicCoordinate { lat: 0.0, lng: 0.0 },
-            GeographicCoordinate { lat: 0.0, lng: 0.01 },
+            GeographicCoordinate {
+                lat: 0.0,
+                lng: 0.01,
+            },
             GeographicCoordinate {
                 lat: 0.0001,
                 lng: 0.01,
@@ -299,6 +431,46 @@ mod tests {
         assert_eq!(heading_difference(350.0, 10.0), 20.0);
         assert_eq!(heading_difference(10.0, 350.0), 20.0);
         assert_eq!(heading_difference(90.0, 270.0), 180.0);
+    }
+
+    #[test]
+    fn route_index_rejects_locations_outside_vendor_bias() {
+        let coords = route_coords();
+        let location = UserLocation {
+            coordinates: GeographicCoordinate {
+                lat: 0.01,
+                lng: 0.005,
+            },
+            ..make_user_location(coord!(x: 0.0, y: 0.0), 5.0)
+        };
+
+        assert!(
+            RouteSnapIndex::new(&coords)
+                .snap_to_route(&location, &test_config())
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn route_index_prunes_a_long_route_to_local_segments() {
+        let coords: Vec<_> = (0..=10_000)
+            .map(|index| GeographicCoordinate {
+                lat: 0.0,
+                lng: index as f64 * 0.0001,
+            })
+            .collect();
+        let route_index = RouteSnapIndex::new(&coords);
+        let location = GeographicCoordinate { lat: 0.0, lng: 0.5 };
+        let candidates = route_index.candidate_indices(location);
+
+        assert!(candidates.contains(&4_999));
+        assert!(candidates.contains(&5_000));
+        assert!(
+            candidates.len() < 100,
+            "expected a local candidate set, got {} of {} segments",
+            candidates.len(),
+            route_index.segments.len()
+        );
     }
 
     #[test]

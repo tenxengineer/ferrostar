@@ -26,6 +26,7 @@ pub use location_class::{LocationClassState, UzLocationClass};
 #[cfg(feature = "std")]
 pub use motion::{MotionPoint, OneDimensionalMotion, RouteBoundStreamer, StreamedPosition};
 pub use snap::RoutePosition;
+pub(crate) use snap::RouteSnapIndex;
 pub use speed_filter::SpeedSample;
 pub use standing::StandingState;
 
@@ -128,6 +129,16 @@ impl UzmatchState {
     /// LCSM classification -> standing signals (coarse/off-route reset) ->
     /// speed filter append -> route snap (only when the class is accurate).
     pub fn update(&self, location: &UserLocation, route: &Route, config: &UzmatchConfig) -> Self {
+        let route_index = RouteSnapIndex::new(&route.geometry);
+        self.update_with_index(location, &route_index, config)
+    }
+
+    pub(crate) fn update_with_index(
+        &self,
+        location: &UserLocation,
+        route_index: &RouteSnapIndex,
+        config: &UzmatchConfig,
+    ) -> Self {
         let timestamp = location.timestamp;
         let mut next = self.clone();
 
@@ -140,8 +151,10 @@ impl UzmatchState {
         let class = next.location_class.state_at(timestamp);
 
         // Standing: query-time expiry, then signal.
-        next.standing
-            .expire_if_stale(timestamp, Duration::from_millis(config.standing_signal_expiry_ms));
+        next.standing.expire_if_stale(
+            timestamp,
+            Duration::from_millis(config.standing_signal_expiry_ms),
+        );
         if !class.is_accurate() {
             // Vendor: coarse signal resets standing history.
             next.standing.reset();
@@ -161,11 +174,15 @@ impl UzmatchState {
 
         // Heading-aware route snap; vendor does not bind coarse locations.
         next.route_position = if class.is_accurate() {
-            let cum = snap::cumulative_lengths(&route.geometry);
-            snap::snap_to_route(location, &route.geometry, &cum, config)
+            route_index.snap_to_route(location, config)
         } else {
             None
         };
+        if class.is_accurate() && next.route_position.is_none() {
+            // Vendor `onOffRouteSignal`: a fine fix outside the route-binding
+            // bias invalidates standing history just like a coarse signal.
+            next.standing.reset();
+        }
 
         next
     }
@@ -197,11 +214,17 @@ mod tests {
         Route {
             geometry: vec![
                 GeographicCoordinate { lat: 0.0, lng: 0.0 },
-                GeographicCoordinate { lat: 0.0, lng: 0.001 },
+                GeographicCoordinate {
+                    lat: 0.0,
+                    lng: 0.001,
+                },
             ],
             bbox: BoundingBox {
                 sw: GeographicCoordinate { lat: 0.0, lng: 0.0 },
-                ne: GeographicCoordinate { lat: 0.0, lng: 0.001 },
+                ne: GeographicCoordinate {
+                    lat: 0.0,
+                    lng: 0.001,
+                },
             },
             distance: 111.0,
             waypoints: vec![],
@@ -276,6 +299,41 @@ mod tests {
         let snapshot = state.snapshot(at(7));
         assert!(snapshot.is_standing);
         assert_eq!(snapshot.location_class, UzLocationClass::Fine);
+    }
+
+    #[test]
+    fn fine_off_route_fix_resets_previously_detected_standing() {
+        let route = test_route();
+        let config = config();
+        let mut state = UzmatchState::default();
+        for timestamp in 0..=7 {
+            let location = UserLocation {
+                timestamp: at(timestamp),
+                speed: Some(Speed {
+                    value: 0.0,
+                    accuracy: None,
+                }),
+                ..make_user_location(coord!(x: 0.0005, y: 0.0001), 5.0)
+            };
+            state = state.update(&location, &route, &config);
+        }
+        assert!(state.standing.is_standing);
+
+        let off_route = UserLocation {
+            timestamp: at(8),
+            speed: Some(Speed {
+                value: 0.0,
+                accuracy: None,
+            }),
+            ..make_user_location(coord!(x: 0.0005, y: 0.01), 5.0)
+        };
+        let mut state = state.update(&off_route, &route, &config);
+        let snapshot = state.snapshot(at(8));
+
+        assert_eq!(snapshot.route_position, None);
+        assert!(!snapshot.is_standing);
+        assert_eq!(state.standing.oldest_signal, None);
+        assert_eq!(state.standing.latest_signal, None);
     }
 
     #[test]

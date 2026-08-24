@@ -94,4 +94,43 @@ final class SpokenObserverTests: XCTestCase {
 
         wait(for: [exp, taskExp], timeout: 10)
     }
+
+    @MainActor func test_structuredInstructionTransformReceivesTriggeringTripState() {
+        let mockSpeechSynthesizer = MockSpeechSynthesizer()
+        let spokenObserver = SpokenInstructionObserver(
+            synthesizer: mockSpeechSynthesizer,
+            isMuted: false,
+            instructionTransform: { instruction, tripState in
+                XCTAssertTrue(Thread.isMainThread)
+                guard case .idle = tripState else {
+                    XCTFail("Expected the triggering trip state")
+                    return instruction
+                }
+                return .init(
+                    text: "Transformed",
+                    ssml: nil,
+                    triggerDistanceBeforeManeuver: instruction.triggerDistanceBeforeManeuver,
+                    utteranceId: instruction.utteranceId
+                )
+            }
+        )
+
+        let exp = expectation(description: "transformed instruction is spoken")
+        mockSpeechSynthesizer.onSpeak = { utterance in
+            XCTAssertEqual(utterance.speechString, "Transformed")
+            exp.fulfill()
+        }
+
+        spokenObserver.spokenInstructionTriggered(
+            .init(
+                text: "Original",
+                ssml: nil,
+                triggerDistanceBeforeManeuver: 100,
+                utteranceId: .init()
+            ),
+            tripState: .idle(userLocation: nil)
+        )
+
+        wait(for: [exp], timeout: 10)
+    }
 }
