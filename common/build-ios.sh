@@ -52,7 +52,17 @@ generate_ffi() {
   fi
 
   mkdir -p ../apple/Sources/UniFFI/
-  mv target/uniffi-xcframework-staging/$1FFI/*.swift ../apple/Sources/UniFFI/
+  for generated_swift in target/uniffi-xcframework-staging/$1FFI/*.swift; do
+    tracked_swift="../apple/Sources/UniFFI/$(basename "$generated_swift")"
+    if [[ -f "$tracked_swift" ]] && cmp -s \
+      <(awk '{ sub(/[[:space:]]+$/, ""); print }' "$generated_swift") \
+      <(awk '{ sub(/[[:space:]]+$/, ""); print }' "$tracked_swift")
+    then
+      rm "$generated_swift"
+    else
+      mv "$generated_swift" "$tracked_swift"
+    fi
+  done
 }
 
 create_fat_simulator_lib() {
