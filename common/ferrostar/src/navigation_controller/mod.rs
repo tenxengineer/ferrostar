@@ -125,10 +125,25 @@ impl Navigator for NavigationController {
             return NavState::complete(location, initial_summary);
         };
 
+        // UzNav matching core: seed from the first location when enabled.
+        let mut uzmatch_state = if let Some(route_index) = &self.route_snap_index {
+            UzmatchState::default().update_with_index(&location, route_index, &self.config.uzmatch)
+        } else {
+            UzmatchState::default()
+        };
+        let uzmatch_snapshot = if self.config.uzmatch.enabled {
+            Some(uzmatch_state.snapshot(location.timestamp))
+        } else {
+            None
+        };
+
         // TODO: We could move this to the Route struct or NavigationController directly to only calculate it once.
         let current_step_linestring = current_route_step.get_linestring();
-        let (current_step_geometry_index, snapped_user_location) =
-            self.snap_user_to_line(location, &current_step_linestring);
+        let (current_step_geometry_index, snapped_user_location) = self.snap_user_to_match_or_line(
+            location,
+            &current_step_linestring,
+            uzmatch_snapshot.as_ref(),
+        );
 
         let progress = calculate_trip_progress(
             &snapped_user_location.into(),
@@ -145,18 +160,6 @@ impl Navigator for NavigationController {
 
         let annotation_json = current_step_geometry_index
             .and_then(|index| current_route_step.get_annotation_at_current_index(index));
-
-        // UzNav matching core: seed from the first location when enabled.
-        let mut uzmatch_state = if let Some(route_index) = &self.route_snap_index {
-            UzmatchState::default().update_with_index(&location, route_index, &self.config.uzmatch)
-        } else {
-            UzmatchState::default()
-        };
-        let uzmatch_snapshot = if self.config.uzmatch.enabled {
-            Some(uzmatch_state.snapshot(location.timestamp))
-        } else {
-            None
-        };
 
         let initial_trip_state = TripState::Navigating {
             current_step_geometry_index,
@@ -442,10 +445,15 @@ impl NavigationController {
                 summary: previous_summary,
                 ..
             } => {
-                // Find the nearest point on the route line
+                // Use the temporal route match when available. The legacy
+                // current-step projection remains the disabled/off-route fallback.
                 let current_step_linestring = current_step.get_linestring();
-                let (current_step_geometry_index, snapped_user_location) =
-                    self.snap_user_to_line(current_user_location, &current_step_linestring);
+                let (current_step_geometry_index, snapped_user_location) = self
+                    .snap_user_to_match_or_line(
+                        current_user_location,
+                        &current_step_linestring,
+                        uzmatch.as_ref(),
+                    );
 
                 // Update trip summary with accumulated distance
                 let updated_summary = previous_summary.update(
@@ -557,6 +565,37 @@ impl NavigationController {
         };
 
         (current_step_geometry_index, snapped_with_course)
+    }
+
+    /// Use the route-global Uzmatch projection when the current fix was bound.
+    ///
+    /// Calculating only the current-step index from the selected coordinate is
+    /// intentional. Re-projecting the raw fix here would allow the controller
+    /// and Uzmatch to disagree at loops and nearby parallel segments.
+    fn snap_user_to_match_or_line(
+        &self,
+        location: UserLocation,
+        line: &LineString,
+        uzmatch: Option<&UzmatchSnapshot>,
+    ) -> (Option<u64>, UserLocation) {
+        let Some(route_position) = uzmatch.and_then(|snapshot| snapshot.route_position) else {
+            return self.snap_user_to_line(location, line);
+        };
+
+        let mut snapped_user_location = UserLocation {
+            coordinates: route_position.coordinates,
+            ..location
+        };
+        if matches!(
+            self.config.snapped_location_course_filtering,
+            models::CourseFiltering::SnapToRoute
+        ) {
+            snapped_user_location.course_over_ground = route_position.course_over_ground;
+        }
+
+        let current_step_geometry_index =
+            index_of_closest_segment_origin(snapped_user_location, line);
+        (current_step_geometry_index, snapped_user_location)
     }
 
     /// Process waypoint advance
@@ -1544,6 +1583,65 @@ mod tests {
             2,
             "step must advance once the vehicle is moving again"
         );
+    }
+
+    #[test]
+    fn uzmatch_projection_is_the_controller_snap_source() {
+        use crate::deviation_detection::RouteDeviationTracking;
+        use crate::models::{CourseOverGround, GeographicCoordinate, Speed};
+        use crate::navigation_controller::models::{CourseFiltering, WaypointAdvanceMode};
+        use crate::navigation_controller::step_advance::conditions::ManualStepCondition;
+
+        let eastbound = gen_dummy_route_step(0.0, 0.0, 0.01, 0.0);
+        let connector = gen_dummy_route_step(0.01, 0.0, 0.01, 0.0001);
+        let westbound = gen_dummy_route_step(0.01, 0.0001, 0.0, 0.0001);
+        let route = gen_route_from_steps(vec![eastbound, connector, westbound]);
+        let config = NavigationControllerConfig {
+            waypoint_advance: WaypointAdvanceMode::WaypointWithinRange(100.0),
+            route_deviation_tracking: RouteDeviationTracking::None,
+            snapped_location_course_filtering: CourseFiltering::SnapToRoute,
+            step_advance_condition: Arc::new(ManualStepCondition),
+            arrival_step_advance_condition: Arc::new(ManualStepCondition),
+            uzmatch: UzmatchConfig {
+                enabled: true,
+                ..UzmatchConfig::default()
+            },
+        };
+        let controller = NavigationController::new(route, config);
+        let location = UserLocation {
+            coordinates: GeographicCoordinate {
+                lat: 0.00008,
+                lng: 0.005,
+            },
+            horizontal_accuracy: 5.0,
+            course_over_ground: Some(CourseOverGround::new(270.0, None)),
+            timestamp: UNIX_EPOCH + Duration::from_secs(10),
+            speed: Some(Speed {
+                value: 10.0,
+                accuracy: None,
+            }),
+        };
+
+        let state = controller.get_initial_state(location);
+        let TripState::Navigating {
+            snapped_user_location,
+            uzmatch: Some(snapshot),
+            ..
+        } = state.trip_state()
+        else {
+            panic!("expected navigating state with Uzmatch snapshot");
+        };
+        let matched = snapshot
+            .route_position
+            .expect("accurate location must bind to the route");
+
+        assert_eq!(matched.segment_index, 4);
+        assert_eq!(snapped_user_location.coordinates, matched.coordinates);
+        assert_eq!(
+            snapped_user_location.course_over_ground,
+            matched.course_over_ground
+        );
+        assert!(snapped_user_location.coordinates.lat > 0.00009);
     }
 
     /// UzNav P1a: while standing, route deviation is not recalculated, so

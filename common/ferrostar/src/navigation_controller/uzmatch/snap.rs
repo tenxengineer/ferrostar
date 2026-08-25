@@ -5,8 +5,9 @@
 //! (`GPS_POSITION_ERROR_STDDEV = 8.0`, `GPS_HEADING_ERROR_STDDEV = 6.0`),
 //! applied to the route polyline (P1a is polyline-based; graph binding is P1b).
 //! Heading is ignored below `snap_heading_min_speed_mps` (vendor
-//! `IGNORE_HEADING_WHEN_SLOWER` mechanism; UzNav default 4.0 m/s).
+//! `IGNORE_HEADING_WHEN_SLOWER` mechanism; `UzNav` default 4.0 m/s).
 
+use core::cmp::Ordering;
 use geo::{Bearing, Coord, Distance, Geodesic, Haversine, Point};
 use rstar::{AABB, RTree, RTreeObject};
 use serde::{Deserialize, Serialize};
@@ -58,13 +59,29 @@ pub(crate) fn heading_difference(a: f64, b: f64) -> f64 {
     if diff > 180.0 { 360.0 - diff } else { diff }
 }
 
-struct SegmentCandidate {
-    score: f64,
-    segment_index: usize,
-    offset_meters: f64,
-    distance_along_route: f64,
-    snapped: GeographicCoordinate,
-    bearing: f64,
+/// Maximum number of candidates retained in one temporal frontier.
+///
+/// With no usable previous position, the snap index returns at most this many
+/// frame-local emission candidates. With a usable previous position, it keeps
+/// this many route candidates on each side before temporal scoring.
+pub(super) const MAX_SNAP_CANDIDATES: usize = 10;
+
+/// One route projection and its frame-local emission log likelihood.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct SnapCandidate {
+    pub route_position: RoutePosition,
+    pub emission_log_likelihood: f64,
+}
+
+fn compare_candidates(left: &SnapCandidate, right: &SnapCandidate) -> Ordering {
+    right
+        .emission_log_likelihood
+        .total_cmp(&left.emission_log_likelihood)
+        .then_with(|| {
+            left.route_position
+                .segment_index
+                .cmp(&right.route_position.segment_index)
+        })
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -143,16 +160,39 @@ impl RouteSnapIndex {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn snap_to_route(
         &self,
         location: &UserLocation,
         config: &UzmatchConfig,
     ) -> Option<RoutePosition> {
+        self.candidates(location, config)
+            .first()
+            .map(|candidate| candidate.route_position)
+    }
+
+    /// Return the strongest frame-local route projections.
+    #[cfg(test)]
+    pub(crate) fn candidates(
+        &self,
+        location: &UserLocation,
+        config: &UzmatchConfig,
+    ) -> Vec<SnapCandidate> {
+        self.candidates_with_anchor(location, config, None)
+    }
+
+    /// Return bounded local route projections relative to a previous match.
+    pub(crate) fn candidates_with_anchor(
+        &self,
+        location: &UserLocation,
+        config: &UzmatchConfig,
+        previous_route_position: Option<RoutePosition>,
+    ) -> Vec<SnapCandidate> {
         if self.segments.is_empty()
             || !location.coordinates.lat.is_finite()
             || !location.coordinates.lng.is_finite()
         {
-            return None;
+            return Vec::new();
         }
 
         let user_point = Point::from(Coord::from(location.coordinates));
@@ -167,7 +207,15 @@ impl RouteSnapIndex {
         // equal-score selection deterministic and preserves the old first-win rule.
         candidate_indices.sort_unstable();
 
-        let mut best: Option<SegmentCandidate> = None;
+        let mut frame_candidates = Vec::with_capacity(candidate_indices.len().min(
+            if previous_route_position.is_some() {
+                MAX_SNAP_CANDIDATES * 2
+            } else {
+                MAX_SNAP_CANDIDATES
+            },
+        ));
+        let mut route_candidates_ahead = Vec::with_capacity(MAX_SNAP_CANDIDATES);
+        let mut route_candidates_behind = Vec::with_capacity(MAX_SNAP_CANDIDATES);
         for index in candidate_indices {
             let segment = self.segments[index];
             let t = if segment.length_squared > f64::EPSILON {
@@ -183,7 +231,7 @@ impl RouteSnapIndex {
                 y: segment.start.y + t * segment.delta_y,
             };
             let distance_meters = Haversine.distance(user_point, Point::from(projection));
-            if distance_meters > MAX_ROUTE_LOCATION_BIAS_METERS {
+            if !distance_meters.is_finite() || distance_meters > MAX_ROUTE_LOCATION_BIAS_METERS {
                 continue;
             }
 
@@ -192,35 +240,49 @@ impl RouteSnapIndex {
                 let delta = heading_difference(user_course.unwrap_or(0.0), segment.bearing);
                 score += -0.5 * (delta / config.snap_heading_stddev_deg).powi(2);
             }
+            if !score.is_finite() {
+                continue;
+            }
 
             let offset_meters = t * segment.length_meters;
-            let candidate = SegmentCandidate {
-                score,
-                segment_index: index,
-                offset_meters,
-                distance_along_route: segment.distance_from_route_start + offset_meters,
-                snapped: GeographicCoordinate {
-                    lat: projection.y,
-                    lng: projection.x,
+            let candidate = SnapCandidate {
+                emission_log_likelihood: score,
+                route_position: RoutePosition {
+                    segment_index: index as u64,
+                    segment_offset_meters: offset_meters,
+                    distance_along_route_meters: segment.distance_from_route_start + offset_meters,
+                    coordinates: GeographicCoordinate {
+                        lat: projection.y,
+                        lng: projection.x,
+                    },
+                    course_over_ground: Some(CourseOverGround::new(segment.bearing, None)),
                 },
-                bearing: segment.bearing,
             };
 
-            if best
-                .as_ref()
-                .is_none_or(|current| candidate.score > current.score)
-            {
-                best = Some(candidate);
+            if let Some(previous) = previous_route_position {
+                if compare_route_positions(&candidate.route_position, &previous) == Ordering::Less {
+                    insert_bounded(
+                        &mut route_candidates_behind,
+                        candidate,
+                        compare_route_candidates_behind,
+                    );
+                } else {
+                    insert_bounded(
+                        &mut route_candidates_ahead,
+                        candidate,
+                        compare_route_candidates_ahead,
+                    );
+                }
+            } else {
+                insert_bounded(&mut frame_candidates, candidate, compare_candidates);
             }
         }
 
-        best.map(|candidate| RoutePosition {
-            segment_index: candidate.segment_index as u64,
-            segment_offset_meters: candidate.offset_meters,
-            distance_along_route_meters: candidate.distance_along_route,
-            coordinates: candidate.snapped,
-            course_over_ground: Some(CourseOverGround::new(candidate.bearing, None)),
-        })
+        if previous_route_position.is_some() {
+            frame_candidates.extend(route_candidates_ahead);
+            frame_candidates.extend(route_candidates_behind);
+        }
+        frame_candidates
     }
 
     fn candidate_indices(&self, point: GeographicCoordinate) -> Vec<usize> {
@@ -249,6 +311,35 @@ impl RouteSnapIndex {
     }
 }
 
+fn compare_route_candidates_ahead(left: &SnapCandidate, right: &SnapCandidate) -> Ordering {
+    compare_route_positions(&left.route_position, &right.route_position)
+}
+
+fn compare_route_candidates_behind(left: &SnapCandidate, right: &SnapCandidate) -> Ordering {
+    compare_route_positions(&right.route_position, &left.route_position)
+}
+
+fn compare_route_positions(left: &RoutePosition, right: &RoutePosition) -> Ordering {
+    left.segment_index.cmp(&right.segment_index).then_with(|| {
+        left.segment_offset_meters
+            .total_cmp(&right.segment_offset_meters)
+    })
+}
+
+fn insert_bounded(
+    candidates: &mut Vec<SnapCandidate>,
+    candidate: SnapCandidate,
+    compare: fn(&SnapCandidate, &SnapCandidate) -> Ordering,
+) {
+    let insertion_index = candidates
+        .binary_search_by(|existing| compare(existing, &candidate))
+        .unwrap_or_else(|index| index);
+    if insertion_index < MAX_SNAP_CANDIDATES {
+        candidates.insert(insertion_index, candidate);
+        candidates.truncate(MAX_SNAP_CANDIDATES);
+    }
+}
+
 /// Interpolate the coordinate and bearing at an absolute route distance.
 /// Used by the streamer to render positions between location updates.
 pub(crate) fn point_at_distance(
@@ -261,9 +352,7 @@ pub(crate) fn point_at_distance(
     }
     let clamped = distance.clamp(0.0, cum.last().copied().unwrap_or(0.0));
     // Binary search for the segment containing `clamped`.
-    let index = match cum
-        .binary_search_by(|v| v.partial_cmp(&clamped).unwrap_or(std::cmp::Ordering::Equal))
-    {
+    let index = match cum.binary_search_by(|v| v.partial_cmp(&clamped).unwrap_or(Ordering::Equal)) {
         Ok(i) => i.min(coords.len() - 2),
         Err(i) => i.saturating_sub(1).min(coords.len() - 2),
     };
@@ -452,6 +541,28 @@ mod tests {
     }
 
     #[test]
+    fn invalid_emission_scale_fails_closed() {
+        let coords = route_coords();
+        let location = UserLocation {
+            coordinates: GeographicCoordinate {
+                lat: 0.0,
+                lng: 0.005,
+            },
+            ..make_user_location(coord!(x: 0.0, y: 0.0), 5.0)
+        };
+        let config = UzmatchConfig {
+            snap_position_stddev_m: 0.0,
+            ..test_config()
+        };
+
+        assert!(
+            RouteSnapIndex::new(&coords)
+                .candidates(&location, &config)
+                .is_empty()
+        );
+    }
+
+    #[test]
     fn route_index_prunes_a_long_route_to_local_segments() {
         let coords: Vec<_> = (0..=10_000)
             .map(|index| GeographicCoordinate {
@@ -470,6 +581,44 @@ mod tests {
             "expected a local candidate set, got {} of {} segments",
             candidates.len(),
             route_index.segments.len()
+        );
+
+        let location = UserLocation {
+            coordinates: location,
+            ..make_user_location(coord!(x: 0.0, y: 0.0), 5.0)
+        };
+        assert!(route_index.candidates(&location, &test_config()).len() <= MAX_SNAP_CANDIDATES);
+    }
+
+    #[test]
+    fn anchored_candidate_sides_use_route_position_at_duplicate_vertices() {
+        let point = GeographicCoordinate { lat: 0.0, lng: 0.0 };
+        let coords = vec![point; 26];
+        let route_index = RouteSnapIndex::new(&coords);
+        let location = UserLocation {
+            coordinates: point,
+            ..make_user_location(coord!(x: 0.0, y: 0.0), 5.0)
+        };
+        let anchor = RoutePosition {
+            segment_index: 15,
+            segment_offset_meters: 0.0,
+            distance_along_route_meters: 0.0,
+            coordinates: point,
+            course_over_ground: None,
+        };
+
+        let candidates =
+            route_index.candidates_with_anchor(&location, &test_config(), Some(anchor));
+        let segment_indices = candidates
+            .iter()
+            .map(|candidate| candidate.route_position.segment_index)
+            .collect::<Vec<_>>();
+
+        assert_eq!(segment_indices.len(), MAX_SNAP_CANDIDATES * 2);
+        assert_eq!(&segment_indices[..10], &(15_u64..25).collect::<Vec<_>>());
+        assert_eq!(
+            &segment_indices[10..],
+            &(5_u64..15).rev().collect::<Vec<_>>()
         );
     }
 

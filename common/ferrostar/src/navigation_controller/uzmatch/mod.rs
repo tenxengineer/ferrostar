@@ -12,6 +12,7 @@ pub mod motion;
 pub mod snap;
 pub mod speed_filter;
 pub mod standing;
+pub mod temporal;
 
 #[cfg(all(feature = "std", not(feature = "web-time")))]
 use std::time::{Duration, SystemTime};
@@ -29,6 +30,7 @@ pub use snap::RoutePosition;
 pub(crate) use snap::RouteSnapIndex;
 pub use speed_filter::SpeedSample;
 pub use standing::StandingState;
+pub use temporal::{TemporalCandidate, TemporalMatchState};
 
 /// Configuration for the UzNav matching core.
 ///
@@ -109,6 +111,10 @@ pub struct UzmatchState {
     pub speed_history: Vec<SpeedSample>,
     /// Latest route position (heading-aware snap).
     pub route_position: Option<RoutePosition>,
+    /// Bounded candidate frontier used to preserve route continuity.
+    #[serde(default)]
+    #[cfg_attr(feature = "uniffi", uniffi(default))]
+    pub temporal_match: TemporalMatchState,
 }
 
 impl Default for UzmatchState {
@@ -118,11 +124,27 @@ impl Default for UzmatchState {
             location_class: LocationClassState::default(),
             speed_history: Vec::new(),
             route_position: None,
+            temporal_match: TemporalMatchState::default(),
         }
     }
 }
 
 impl UzmatchState {
+    fn copy_for_update(&self) -> Self {
+        let temporal_match = if self.temporal_match.candidates.len() <= snap::MAX_SNAP_CANDIDATES {
+            self.temporal_match.clone()
+        } else {
+            TemporalMatchState::default()
+        };
+        Self {
+            standing: self.standing,
+            location_class: self.location_class,
+            speed_history: self.speed_history.clone(),
+            route_position: self.route_position,
+            temporal_match,
+        }
+    }
+
     /// Advance the matching core with a new raw location.
     ///
     /// Mirrors the vendor `LocationStreamer` signal flow:
@@ -140,7 +162,8 @@ impl UzmatchState {
         config: &UzmatchConfig,
     ) -> Self {
         let timestamp = location.timestamp;
-        let mut next = self.clone();
+        // Reject an oversized external temporal frontier before copying it.
+        let mut next = self.copy_for_update();
 
         // LCSM: fine vs coarse signal by accuracy (UzNav policy threshold).
         if location.horizontal_accuracy <= config.fine_accuracy_threshold_m {
@@ -174,8 +197,20 @@ impl UzmatchState {
 
         // Heading-aware route snap; vendor does not bind coarse locations.
         next.route_position = if class.is_accurate() {
-            route_index.snap_to_route(location, config)
+            let candidate_anchor = next.temporal_match.candidate_anchor(location);
+            let candidates = route_index.candidates_with_anchor(location, config, candidate_anchor);
+            let (mut temporal_match, continued_previous_frontier) = next
+                .temporal_match
+                .update_with_status(location, &candidates, config);
+            if candidate_anchor.is_some() && !continued_previous_frontier {
+                let frame_local = route_index.candidates_with_anchor(location, config, None);
+                temporal_match =
+                    TemporalMatchState::default().update(location, &frame_local, config);
+            }
+            next.temporal_match = temporal_match;
+            next.temporal_match.route_position()
         } else {
+            next.temporal_match = TemporalMatchState::default();
             None
         };
         if class.is_accurate() && next.route_position.is_none() {
@@ -245,6 +280,15 @@ mod tests {
     }
 
     #[test]
+    fn serialized_pre_temporal_state_uses_an_empty_frontier() {
+        let mut value = serde_json::to_value(UzmatchState::default()).unwrap();
+        value.as_object_mut().unwrap().remove("temporal_match");
+
+        let restored: UzmatchState = serde_json::from_value(value).unwrap();
+        assert_eq!(restored, UzmatchState::default());
+    }
+
+    #[test]
     fn update_produces_route_position_for_fine_location() {
         let route = test_route();
         let state = UzmatchState::default();
@@ -265,6 +309,255 @@ mod tests {
     }
 
     #[test]
+    fn temporal_match_stays_on_the_entered_branch_at_a_self_crossing() {
+        let route = Route {
+            geometry: vec![
+                GeographicCoordinate {
+                    lat: 0.0,
+                    lng: -0.001,
+                },
+                GeographicCoordinate {
+                    lat: 0.0,
+                    lng: 0.001,
+                },
+                GeographicCoordinate {
+                    lat: 0.001,
+                    lng: 0.001,
+                },
+                GeographicCoordinate {
+                    lat: -0.001,
+                    lng: -0.001,
+                },
+            ],
+            bbox: BoundingBox {
+                sw: GeographicCoordinate {
+                    lat: -0.001,
+                    lng: -0.001,
+                },
+                ne: GeographicCoordinate {
+                    lat: 0.001,
+                    lng: 0.001,
+                },
+            },
+            distance: 0.0,
+            waypoints: vec![],
+            steps: vec![],
+        };
+        let config = config();
+        let route_index = RouteSnapIndex::new(&route.geometry);
+        let moving_slowly = |seconds: u64, lng: f64, lat: f64| UserLocation {
+            timestamp: at(seconds),
+            coordinates: GeographicCoordinate { lat, lng },
+            horizontal_accuracy: 5.0,
+            speed: Some(Speed {
+                value: 2.0,
+                accuracy: None,
+            }),
+            course_over_ground: None,
+        };
+
+        let before_crossing = moving_slowly(0, 0.0002, 0.0002);
+        let at_crossing = moving_slowly(1, 0.0, 0.0);
+        let frame_local = route_index
+            .snap_to_route(&at_crossing, &config)
+            .expect("crossing must produce a frame-local candidate");
+        assert_eq!(
+            frame_local.segment_index, 0,
+            "route-order tie break demonstrates the frame-local ambiguity"
+        );
+
+        let state =
+            UzmatchState::default().update_with_index(&before_crossing, &route_index, &config);
+        assert_eq!(
+            state.route_position.map(|position| position.segment_index),
+            Some(2)
+        );
+
+        let state = state.update_with_index(&at_crossing, &route_index, &config);
+        assert_eq!(
+            state.route_position.map(|position| position.segment_index),
+            Some(2),
+            "temporal continuity must keep the branch already being travelled"
+        );
+    }
+
+    #[test]
+    fn temporal_match_preserves_previous_branch_when_more_than_ten_segments_overlap() {
+        let a = GeographicCoordinate {
+            lat: 0.0,
+            lng: -0.001,
+        };
+        let b = GeographicCoordinate {
+            lat: 0.0,
+            lng: 0.001,
+        };
+        let route = Route {
+            geometry: (0..=20)
+                .map(|index| if index % 2 == 0 { a } else { b })
+                .collect(),
+            bbox: BoundingBox { sw: a, ne: b },
+            distance: 0.0,
+            waypoints: vec![],
+            steps: vec![],
+        };
+        let previous_location = UserLocation {
+            timestamp: at(0),
+            coordinates: GeographicCoordinate { lat: 0.0, lng: 0.0 },
+            horizontal_accuracy: 5.0,
+            speed: Some(Speed {
+                value: 10.0,
+                accuracy: None,
+            }),
+            course_over_ground: None,
+        };
+        let previous_route_position = RoutePosition {
+            segment_index: 15,
+            segment_offset_meters: 111.0,
+            distance_along_route_meters: 3_447.0,
+            coordinates: GeographicCoordinate { lat: 0.0, lng: 0.0 },
+            course_over_ground: None,
+        };
+        let state = UzmatchState {
+            route_position: Some(previous_route_position),
+            temporal_match: TemporalMatchState {
+                candidates: vec![TemporalCandidate {
+                    route_position: previous_route_position,
+                    accumulated_log_likelihood: 0.0,
+                }],
+                previous_location: Some(previous_location),
+            },
+            ..UzmatchState::default()
+        };
+        let current_location = UserLocation {
+            timestamp: at(1),
+            ..previous_location
+        };
+
+        let route_index = RouteSnapIndex::new(&route.geometry);
+        let frame_local = route_index.candidates(&current_location, &config());
+        assert_eq!(
+            frame_local
+                .first()
+                .map(|candidate| candidate.route_position.segment_index),
+            Some(0)
+        );
+        assert!(
+            frame_local
+                .iter()
+                .all(|candidate| candidate.route_position.segment_index != 15),
+            "the regression must demonstrate that frame-local top-K drops the established branch"
+        );
+        let anchored = route_index.candidates_with_anchor(
+            &current_location,
+            &config(),
+            Some(previous_route_position),
+        );
+        assert!(anchored.len() <= snap::MAX_SNAP_CANDIDATES * 2);
+        assert!(
+            anchored
+                .iter()
+                .any(|candidate| candidate.route_position.segment_index == 15)
+        );
+
+        let state = state.update(&current_location, &route, &config());
+
+        assert_eq!(
+            state.route_position.map(|position| position.segment_index),
+            Some(15),
+            "the current projection of the previously selected branch must survive candidate truncation"
+        );
+    }
+
+    #[test]
+    fn unreachable_anchored_candidates_reset_to_frame_local_emissions() {
+        let a = GeographicCoordinate {
+            lat: 0.0,
+            lng: -0.001,
+        };
+        let b = GeographicCoordinate {
+            lat: 0.0,
+            lng: 0.001,
+        };
+        let previous_coordinates = GeographicCoordinate { lat: 0.0, lng: 0.1 };
+        let mut geometry = (0..=30)
+            .map(|index| if index % 2 == 0 { a } else { b })
+            .collect::<Vec<_>>();
+        geometry.push(previous_coordinates);
+        let route = Route {
+            geometry,
+            bbox: BoundingBox {
+                sw: a,
+                ne: previous_coordinates,
+            },
+            distance: 0.0,
+            waypoints: vec![],
+            steps: vec![],
+        };
+        let previous_location = UserLocation {
+            timestamp: at(0),
+            coordinates: previous_coordinates,
+            horizontal_accuracy: 5.0,
+            speed: Some(Speed {
+                value: 10.0,
+                accuracy: None,
+            }),
+            course_over_ground: None,
+        };
+        let previous_route_position = RoutePosition {
+            segment_index: 30,
+            segment_offset_meters: 11_000.0,
+            distance_along_route_meters: 100_000.0,
+            coordinates: previous_coordinates,
+            course_over_ground: None,
+        };
+        let state = UzmatchState {
+            route_position: Some(previous_route_position),
+            temporal_match: TemporalMatchState {
+                candidates: vec![TemporalCandidate {
+                    route_position: previous_route_position,
+                    accumulated_log_likelihood: 0.0,
+                }],
+                previous_location: Some(previous_location),
+            },
+            ..UzmatchState::default()
+        };
+        let current_location = UserLocation {
+            timestamp: at(1),
+            coordinates: GeographicCoordinate { lat: 0.0, lng: 0.0 },
+            ..previous_location
+        };
+
+        let state = state.update(&current_location, &route, &config());
+
+        assert_eq!(
+            state.route_position.map(|position| position.segment_index),
+            Some(0),
+            "an unreachable anchored layer must restart from the strongest frame-local emissions"
+        );
+    }
+
+    #[test]
+    fn update_copy_rejects_oversized_temporal_frontier_before_clone() {
+        let mut state = UzmatchState::default();
+        state.temporal_match.candidates = (0..=snap::MAX_SNAP_CANDIDATES)
+            .map(|segment_index| TemporalCandidate {
+                route_position: RoutePosition {
+                    segment_index: segment_index as u64,
+                    segment_offset_meters: 0.0,
+                    distance_along_route_meters: segment_index as f64,
+                    coordinates: GeographicCoordinate { lat: 0.0, lng: 0.0 },
+                    course_over_ground: None,
+                },
+                accumulated_log_likelihood: 0.0,
+            })
+            .collect();
+
+        let copied = state.copy_for_update();
+
+        assert_eq!(copied.temporal_match, TemporalMatchState::default());
+    }
+
+    #[test]
     fn coarse_location_is_not_bound_to_route() {
         let route = test_route();
         let state = UzmatchState::default();
@@ -277,6 +570,7 @@ mod tests {
         let snapshot = next.snapshot(at(0));
         assert_eq!(snapshot.location_class, UzLocationClass::Coarse);
         assert_eq!(snapshot.route_position, None);
+        assert!(next.temporal_match.candidates.is_empty());
     }
 
     #[test]
