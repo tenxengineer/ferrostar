@@ -80,8 +80,24 @@ impl StepProgressIndex {
         let current_step_index = self.steps.len().checked_sub(remaining_steps_len)?;
         let step = *self.steps.get(current_step_index)?;
         let route_segment = usize::try_from(route_position.segment_index).ok()?;
-        if route_segment < step.first_route_segment || route_segment >= step.end_route_segment {
+        if route_segment < step.first_route_segment {
             return None;
+        }
+        if route_segment >= step.end_route_segment {
+            // Vendor model (NaviKit `IndexedRoute`): the maneuver is a fixed
+            // route-global position, so a match that already passed it is zero
+            // distance ahead. Falling back to the frame-local step projection
+            // here re-projected the passed coordinate onto the step geometry,
+            // which reinflated the distance and rewound the geometry index at
+            // hairpins and nearby parallel legs.
+            if route_segment >= self.route_segment_lengths.len() {
+                return None;
+            }
+            return Some(IndexedStepPosition {
+                current_step_geometry_index: (step.end_route_segment - step.first_route_segment)
+                    .saturating_sub(1) as u64,
+                distance_to_next_maneuver: 0.0,
+            });
         }
 
         let distance_at_segment_start = *self.route_vertex_distances.get(route_segment)?;
@@ -223,6 +239,83 @@ mod tests {
         ];
 
         assert!(StepProgressIndex::new(&route).is_none());
+    }
+
+    #[test]
+    fn match_past_step_end_clamps_to_the_maneuver() {
+        let route = aligned_route(vec![
+            vec![coord!(x: 0.0, y: 0.0), coord!(x: 0.00001, y: 0.0)],
+            vec![coord!(x: 0.00001, y: 0.0), coord!(x: 0.00002, y: 0.0)],
+        ]);
+        let index = StepProgressIndex::new(&route).expect("aligned route must be indexed");
+
+        let position = index
+            .locate(route_position(1, 0.5), 2)
+            .expect("a match past the current step's end is the maneuver, not a fallback");
+
+        assert_eq!(position.current_step_geometry_index, 0);
+        assert_eq!(position.distance_to_next_maneuver, 0.0);
+    }
+
+    #[test]
+    fn hairpin_match_past_step_end_does_not_reinflate_distance() {
+        // Step 0 is a hairpin that returns next to its own origin; step 1 passes
+        // within ~1 m of step 0's first segment. A fix matched onto step 1 while
+        // step 0 is still current previously fell back to the frame-local
+        // step projection, which snapped to the early hairpin leg and reported
+        // ~90 m to a maneuver the user had already passed.
+        let route = aligned_route(vec![
+            vec![
+                coord!(x: 0.0, y: 0.0),
+                coord!(x: 0.0004, y: 0.0),
+                coord!(x: 0.0004, y: 0.00003),
+                coord!(x: 0.00001, y: 0.00003),
+            ],
+            vec![coord!(x: 0.00001, y: 0.00003), coord!(x: 0.00001, y: 0.0)],
+        ]);
+        let mut config = get_test_navigation_controller_config(Arc::new(ManualStepCondition));
+        config.uzmatch.enabled = true;
+        let controller = NavigationController::new(route.clone(), config);
+        assert!(controller.step_progress_index.is_some());
+
+        let match_coordinates = GeographicCoordinate {
+            lat: 0.00001,
+            lng: 0.00001,
+        };
+        let location = UserLocation {
+            coordinates: match_coordinates,
+            horizontal_accuracy: 5.0,
+            course_over_ground: None,
+            timestamp: SystemTime::UNIX_EPOCH,
+            speed: None,
+        };
+        let snapshot = UzmatchSnapshot {
+            route_position: Some(RoutePosition {
+                segment_index: 3,
+                segment_offset_meters: 2.2,
+                distance_along_route_meters: 0.0,
+                coordinates: match_coordinates,
+                course_over_ground: None,
+            }),
+            is_standing: false,
+            location_class: UzLocationClass::Fine,
+            filtered_speed_mps: None,
+        };
+
+        let (current_step_geometry_index, snapped_user_location, progress) = controller.step_state(
+            location,
+            &route.steps[0],
+            &route.steps,
+            Some(&snapshot),
+        );
+
+        assert_eq!(current_step_geometry_index, Some(2));
+        assert_eq!(snapped_user_location.coordinates, match_coordinates);
+        assert_eq!(progress.distance_to_next_maneuver, 0.0);
+        assert!(
+            (progress.distance_remaining - route.steps[1].distance).abs() < 1e-9,
+            "past the maneuver only the next step's distance remains"
+        );
     }
 
     #[test]
