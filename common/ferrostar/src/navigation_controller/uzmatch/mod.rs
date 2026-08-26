@@ -14,6 +14,9 @@ pub mod speed_filter;
 pub mod standing;
 pub mod temporal;
 
+#[cfg(test)]
+mod evidence;
+
 #[cfg(all(feature = "std", not(feature = "web-time")))]
 use std::time::{Duration, SystemTime};
 #[cfg(feature = "web-time")]
@@ -84,8 +87,9 @@ impl Default for UzmatchConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct UzmatchSnapshot {
-    /// Route-global position from the heading-aware snap; `None` while the
-    /// location class is not accurate (vendor does not bind coarse locations).
+    /// Route-global position from the heading-aware snap; `None` when the
+    /// current raw fix is not eligible for downstream snapping. The persistent
+    /// location class can remain Fine briefly after a coarse fix.
     pub route_position: Option<RoutePosition>,
     /// True when the user has been at/below the standing speed threshold for
     /// the detection period. Gates step advance and deviation recalculation.
@@ -147,9 +151,9 @@ impl UzmatchState {
 
     /// Advance the matching core with a new raw location.
     ///
-    /// Mirrors the vendor `LocationStreamer` signal flow:
-    /// LCSM classification -> standing signals (coarse/off-route reset) ->
-    /// speed filter append -> route snap (only when the class is accurate).
+    /// Mirrors the vendor signal separation:
+    /// LCSM classification -> standing signals (raw coarse/off-route reset) ->
+    /// speed filter append -> route snap (only for an eligible raw fix).
     pub fn update(&self, location: &UserLocation, route: &Route, config: &UzmatchConfig) -> Self {
         let route_index = RouteSnapIndex::new(&route.geometry);
         self.update_with_index(location, &route_index, config)
@@ -165,29 +169,35 @@ impl UzmatchState {
         // Reject an oversized external temporal frontier before copying it.
         let mut next = self.copy_for_update();
 
-        // LCSM: fine vs coarse signal by accuracy (UzNav policy threshold).
-        if location.horizontal_accuracy <= config.fine_accuracy_threshold_m {
+        // Keep the raw signal quality separate from the persistent vendor
+        // location class. `on_coarse_location` intentionally preserves a
+        // recent Fine/Extrapolated class, but that must not make the raw coarse
+        // fix eligible for downstream route snapping.
+        let is_fine_signal = location.horizontal_accuracy.is_finite()
+            && location.horizontal_accuracy >= 0.0
+            && location.horizontal_accuracy <= config.fine_accuracy_threshold_m;
+        if is_fine_signal {
             next.location_class.on_fine_location(timestamp);
         } else {
             next.location_class.on_coarse_location(timestamp);
         }
-        let class = next.location_class.state_at(timestamp);
+        next.location_class.state_at(timestamp);
 
         // Standing: query-time expiry, then signal.
         next.standing.expire_if_stale(
             timestamp,
             Duration::from_millis(config.standing_signal_expiry_ms),
         );
-        if !class.is_accurate() {
-            // Vendor: coarse signal resets standing history.
-            next.standing.reset();
-        } else {
+        if is_fine_signal {
             next.standing.on_accurate_signal(
                 location.speed.map(|s| s.value),
                 timestamp,
                 config.standing_speed_threshold_mps,
                 Duration::from_millis(config.standing_detection_period_ms),
             );
+        } else {
+            // Vendor: coarse signal resets standing history.
+            next.standing.reset();
         }
 
         // Speed filter (vendor appends the bound location speed).
@@ -195,8 +205,9 @@ impl UzmatchState {
             speed_filter::append_speed(&mut next.speed_history, speed.value, timestamp);
         }
 
-        // Heading-aware route snap; vendor does not bind coarse locations.
-        next.route_position = if class.is_accurate() {
+        // Heading-aware route snap. The public downstream contract keeps raw
+        // coarse fixes unsnapped even while the persistent class is still Fine.
+        next.route_position = if is_fine_signal {
             let candidate_anchor = next.temporal_match.candidate_anchor(location);
             let candidates = route_index.candidates_with_anchor(location, config, candidate_anchor);
             let (mut temporal_match, continued_previous_frontier) = next
@@ -213,7 +224,7 @@ impl UzmatchState {
             next.temporal_match = TemporalMatchState::default();
             None
         };
-        if class.is_accurate() && next.route_position.is_none() {
+        if is_fine_signal && next.route_position.is_none() {
             // Vendor `onOffRouteSignal`: a fine fix outside the route-binding
             // bias invalidates standing history just like a coarse signal.
             next.standing.reset();
@@ -571,6 +582,67 @@ mod tests {
         assert_eq!(snapshot.location_class, UzLocationClass::Coarse);
         assert_eq!(snapshot.route_position, None);
         assert!(next.temporal_match.candidates.is_empty());
+    }
+
+    #[test]
+    fn coarse_fix_after_fine_is_not_published_as_a_route_match() {
+        let route = test_route();
+        let config = config();
+        let mut state = UzmatchState::default();
+        for timestamp in 0..=7 {
+            let fine = UserLocation {
+                timestamp: at(timestamp),
+                speed: Some(Speed {
+                    value: 0.0,
+                    accuracy: None,
+                }),
+                ..make_user_location(coord!(x: 0.0005, y: 0.0001), 5.0)
+            };
+            state = state.update(&fine, &route, &config);
+        }
+        assert!(state.route_position.is_some());
+        assert!(state.standing.is_standing);
+
+        let coarse = UserLocation {
+            timestamp: at(8),
+            ..make_user_location(coord!(x: 0.0005, y: 0.0001), 100.0)
+        };
+
+        let mut state = state.update(&coarse, &route, &config);
+        let snapshot = state.snapshot(at(8));
+
+        assert_eq!(
+            snapshot.location_class,
+            UzLocationClass::Fine,
+            "vendor LCSM keeps the last fine class until its timeout"
+        );
+        assert_eq!(
+            snapshot.route_position, None,
+            "raw coarse fixes must not become downstream snapped positions"
+        );
+        assert!(state.temporal_match.candidates.is_empty());
+        assert!(!snapshot.is_standing);
+    }
+
+    #[test]
+    fn invalid_accuracy_fixes_are_not_published_as_route_matches() {
+        let route = test_route();
+        let config = config();
+
+        for horizontal_accuracy in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -1.0] {
+            let location = UserLocation {
+                timestamp: at(0),
+                ..make_user_location(coord!(x: 0.0005, y: 0.0001), horizontal_accuracy)
+            };
+
+            let state = UzmatchState::default().update(&location, &route, &config);
+
+            assert_eq!(
+                state.route_position, None,
+                "invalid horizontal accuracy {horizontal_accuracy} must fail closed"
+            );
+            assert!(state.temporal_match.candidates.is_empty());
+        }
     }
 
     #[test]
