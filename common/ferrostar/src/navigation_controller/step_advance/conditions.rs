@@ -95,16 +95,24 @@ impl DistanceToEndOfStepCondition {
         let user_location = trip_state.user_location()?;
         let current_step = trip_state.current_step()?;
 
-        let should_advance =
-            if user_location.horizontal_accuracy > self.minimum_horizontal_accuracy.into() {
-                false
-            } else {
-                is_within_threshold_to_end_of_linestring(
-                    &user_location.into(),
-                    &current_step.get_linestring(),
-                    f64::from(self.distance),
-                )
-            };
+        let should_advance = if user_location.horizontal_accuracy
+            > self.minimum_horizontal_accuracy.into()
+        {
+            false
+        } else if let Some(distance_to_maneuver) = trip_state.bound_distance_to_next_maneuver() {
+            // UzNav (vendor guide-tpl model): a bound fix advances by its
+            // route-global distance to the maneuver, not by the raw fix's
+            // straight-line proximity to the step end — a laterally offset
+            // GPS track could otherwise never enter the radius and the
+            // step would stick long after the matcher passed the turn.
+            distance_to_maneuver <= f64::from(self.distance)
+        } else {
+            is_within_threshold_to_end_of_linestring(
+                &user_location.into(),
+                &current_step.get_linestring(),
+                f64::from(self.distance),
+            )
+        };
 
         let result = if should_advance {
             StepAdvanceResult::advance_to_new_instance(self)
@@ -202,7 +210,14 @@ impl DistanceFromStepCondition {
             // Bail early
             false
         } else {
-            let current_position: Point = user_location.into();
+            // UzNav: a bound fix measures its departure from the step with the
+            // matched on-route position (vendor guide-tpl model) — the raw fix
+            // can sit 30+ m off the carriageway and read as "left the step"
+            // while the matcher still stands at the maneuver, or vice versa.
+            let current_position: Point = trip_state
+                .bound_snapped_location()
+                .unwrap_or(user_location)
+                .into();
             let current_step_linestring = current_step.get_linestring();
 
             deviation_from_line(&current_position, &current_step_linestring)

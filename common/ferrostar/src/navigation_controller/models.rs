@@ -297,6 +297,38 @@ impl TripState {
         }
     }
 
+    /// Route-global distance to the next maneuver, but ONLY when the current
+    /// fix was bound by uzmatch — the value then comes from the validated
+    /// step-progress index (vendor `IndexedRoute` model) instead of a
+    /// frame-local scan, so advance conditions may trust it over the raw fix.
+    pub(crate) fn bound_distance_to_next_maneuver(&self) -> Option<f64> {
+        match self {
+            TripState::Navigating {
+                progress, uzmatch, ..
+            } => {
+                uzmatch.as_ref()?.route_position?;
+                Some(progress.distance_to_next_maneuver)
+            }
+            _ => None,
+        }
+    }
+
+    /// The snapped location when the current fix was bound by uzmatch; `None`
+    /// otherwise so callers fall back to the raw fix.
+    pub(crate) fn bound_snapped_location(&self) -> Option<UserLocation> {
+        match self {
+            TripState::Navigating {
+                snapped_user_location,
+                uzmatch,
+                ..
+            } => {
+                uzmatch.as_ref()?.route_position?;
+                Some(*snapped_user_location)
+            }
+            _ => None,
+        }
+    }
+
     pub(crate) fn next_step(&self) -> Option<RouteStep> {
         self.get_step(1)
     }

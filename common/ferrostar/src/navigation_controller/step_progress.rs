@@ -322,12 +322,8 @@ mod tests {
             filtered_speed_mps: None,
         };
 
-        let (current_step_geometry_index, snapped_user_location, progress) = controller.step_state(
-            location,
-            &route.steps[0],
-            &route.steps,
-            Some(&snapshot),
-        );
+        let (current_step_geometry_index, snapped_user_location, progress) =
+            controller.step_state(location, &route.steps[0], &route.steps, Some(&snapshot));
 
         assert_eq!(current_step_geometry_index, Some(2));
         assert_eq!(snapped_user_location.coordinates, match_coordinates);

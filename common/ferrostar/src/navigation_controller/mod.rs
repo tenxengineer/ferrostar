@@ -1844,6 +1844,78 @@ mod tests {
         );
     }
 
+    /// Vendor guide model (`guide_impl.cpp`: `drivingRoute()->setPosition`):
+    /// a bound fix advances maneuvers by its route-global position. A raw GPS
+    /// track offset ~40 m laterally must still advance the step once the
+    /// MATCHED position passes the maneuver — under the raw-proximity entry
+    /// check it never could, because the raw fix never enters the 30 m radius.
+    #[test]
+    fn uzmatch_bound_position_advances_offset_raw_track() {
+        use crate::deviation_detection::RouteDeviationTracking;
+        use crate::models::{GeographicCoordinate, Speed};
+        use crate::navigation_controller::models::{CourseFiltering, WaypointAdvanceMode};
+        use crate::navigation_controller::step_advance::conditions::ManualStepCondition;
+        use crate::navigation_controller::step_advance::step_advance_distance_entry_and_exit;
+
+        let step1 = gen_dummy_route_step(0.0, 0.0, 0.001, 0.0);
+        let step2 = gen_dummy_route_step(0.001, 0.0, 0.002, 0.0);
+        let step3 = gen_dummy_route_step(0.002, 0.0, 0.002, 0.001);
+        let route = gen_route_from_steps(vec![step1, step2, step3]);
+
+        let config = NavigationControllerConfig {
+            waypoint_advance: WaypointAdvanceMode::WaypointWithinRange(100.0),
+            route_deviation_tracking: RouteDeviationTracking::StaticThreshold {
+                minimum_horizontal_accuracy: 32,
+                max_acceptable_deviation: 50.0,
+            },
+            snapped_location_course_filtering: CourseFiltering::Raw,
+            step_advance_condition: step_advance_distance_entry_and_exit(30, 5, 25),
+            arrival_step_advance_condition: Arc::new(ManualStepCondition),
+            uzmatch: UzmatchConfig {
+                enabled: true,
+                ..UzmatchConfig::default()
+            },
+        };
+        let controller = NavigationController::new(route, config);
+
+        let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        // Raw fixes ride ~40 m north of the route line (lat 0.00036) while
+        // progressing east; the matcher binds them to the line below.
+        let loc = |t: u64, lng: f64| UserLocation {
+            coordinates: GeographicCoordinate { lng, lat: 0.00036 },
+            horizontal_accuracy: 5.0,
+            course_over_ground: None,
+            timestamp: t0 + Duration::from_secs(t),
+            speed: Some(Speed {
+                value: 10.0,
+                accuracy: None,
+            }),
+        };
+        let remaining = |state: &NavState| match state.trip_state() {
+            TripState::Navigating {
+                remaining_steps, ..
+            } => remaining_steps.len(),
+            other => panic!("expected Navigating, got {other:?}"),
+        };
+
+        let mut state = controller.get_initial_state(loc(0, 0.0));
+        assert_eq!(remaining(&state), 3);
+        // Drive past the first maneuver (step 1 ends at lng 0.001 ≈ 111 m).
+        for (i, lng) in [
+            0.0002, 0.0004, 0.0006, 0.0008, 0.00095, 0.00105, 0.0012, 0.0013,
+        ]
+        .iter()
+        .enumerate()
+        {
+            state = controller.update_user_location(loc(i as u64 + 1, *lng), state);
+        }
+        assert_eq!(
+            remaining(&state),
+            2,
+            "the matched route position passed the maneuver, so the step must advance"
+        );
+    }
+
     /// UzNav P1a: while standing, route deviation is not recalculated, so
     /// jitter off the route line does not flap the deviation flag.
     #[test]
