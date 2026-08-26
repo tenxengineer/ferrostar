@@ -35,6 +35,14 @@ const JUMP_DISTANCE_THRESHOLD: f64 = 10.0;
 /// Vendor `MAX_REASONABLE_ADVANCEMENT` (location_streamer.cpp): longer gaps
 /// between ticks reset the streamer instead of animating.
 const MAX_REASONABLE_ADVANCEMENT: Duration = Duration::from_secs(10);
+/// Vendor `EXTRAPOLATED_LOCATION_TIMEOUT` (location_guide_config.h): how long
+/// the rendered position may keep moving along the route past the last
+/// supplied fix (tunnels, urban canyons). The vendor enforces this via the
+/// location-class machine; here it caps the motion directly — `point()` past
+/// the curve end extrapolates linearly at the final speed (the vendor's own
+/// `None`-branch behavior), and without this cap a tunnel with no fixes would
+/// stream the puck forward without bound.
+const EXTRAPOLATION_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Cubic Bezier curve over 2D points (vendor `CubicBezierCurve`).
 #[derive(Debug, Clone, Copy)]
@@ -234,6 +242,20 @@ struct BoundMotionState {
     point: MotionPoint,
     /// Vendor `isMotionAvailable_`.
     available: bool,
+    /// Timestamp of the last accepted fix; motion past this plus
+    /// [`EXTRAPOLATION_TIMEOUT`] freezes instead of extrapolating further.
+    last_supply_at: SystemTime,
+}
+
+impl BoundMotionState {
+    /// How much of `advancement` may still move the rendered position, given
+    /// the extrapolation cap past the last supplied fix.
+    fn allowed_motion(&self, advancement: Duration) -> Duration {
+        (self.last_supply_at + EXTRAPOLATION_TIMEOUT)
+            .duration_since(self.current_timestamp)
+            .unwrap_or(Duration::ZERO)
+            .min(advancement)
+    }
 }
 
 #[derive(Debug)]
@@ -333,9 +355,8 @@ impl RouteBoundStreamer {
         let state = motion.as_mut()?;
         if state.available {
             let previous_point = state.point;
-            state.point = state
-                .motion
-                .point(state.point.time + advancement.as_secs_f64());
+            let allowed = state.allowed_motion(advancement);
+            state.point = state.motion.point(state.point.time + allowed.as_secs_f64());
             let distance = (state.point.distance - previous_point.distance).max(0.0);
             state.current_distance += distance;
             state.current_timestamp += advancement;
@@ -375,9 +396,8 @@ impl RouteBoundStreamer {
         }
 
         let (distance, speed) = if state.available {
-            let point = state
-                .motion
-                .point(state.point.time + advancement.as_secs_f64());
+            let allowed = state.allowed_motion(advancement);
+            let point = state.motion.point(state.point.time + allowed.as_secs_f64());
             (
                 state.current_distance + (point.distance - state.point.distance).max(0.0),
                 Some(point.speed),
@@ -423,6 +443,7 @@ fn initial_motion_state(location: UserLocation, route_distance: f64) -> BoundMot
             speed: location.speed.map(|s| s.value).unwrap_or(0.0),
         },
         available: true,
+        last_supply_at: location.timestamp,
     }
 }
 
@@ -469,6 +490,7 @@ fn supply_location(state: &mut BoundMotionState, location: UserLocation, route_d
     state.motion =
         OneDimensionalMotion::new(state.point.speed, new_speed, interval.as_secs_f64(), path);
     state.point = state.motion.point(0.0);
+    state.last_supply_at = location.timestamp;
 }
 
 #[cfg(test)]
@@ -535,6 +557,56 @@ mod tests {
         let p = motion.point(2.0);
         assert!(p.distance > 10.0, "must extrapolate past the end");
         assert!((p.speed - 10.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn extrapolation_freezes_at_the_vendor_timeout() {
+        use crate::models::Speed;
+        let route = test_route();
+        let streamer = RouteBoundStreamer::new(&route);
+        let moving = |t: u64, dist: f64| {
+            let base = make_user_location(coord!(x: 0.0, y: 0.0), 5.0);
+            let loc = UserLocation {
+                timestamp: at(t),
+                speed: Some(Speed {
+                    value: 2.0,
+                    accuracy: None,
+                }),
+                ..base
+            };
+            streamer.on_route_bound_location(loc, dist);
+        };
+
+        // Two fixes at 2 m/s, then the signal dies (tunnel).
+        moving(100, 0.0);
+        streamer.advance_to(at(100));
+        moving(101, 2.0);
+
+        // The rendered position keeps moving along the route at the final
+        // curve speed (`point()` extrapolates past the curve end)...
+        let mut previous = streamer.advance_to(at(102)).unwrap();
+        for t in 103..=130 {
+            let rendered = streamer.advance_to(at(t)).unwrap();
+            assert!(
+                rendered.distance_along_route_meters >= previous.distance_along_route_meters,
+                "extrapolated motion must be monotonic"
+            );
+            previous = rendered;
+        }
+        assert!(
+            previous.distance_along_route_meters > 20.0,
+            "the tunnel span must actually move the rendered position, got {}",
+            previous.distance_along_route_meters
+        );
+
+        // ...but freezes at EXTRAPOLATED_LOCATION_TIMEOUT (30 s) past the
+        // last supplied fix instead of streaming forward without bound.
+        let capped = streamer.advance_to(at(133)).unwrap();
+        let later = streamer.advance_to(at(138)).unwrap();
+        assert_eq!(
+            capped.distance_along_route_meters, later.distance_along_route_meters,
+            "past the vendor timeout the rendered position must hold still"
+        );
     }
 
     #[test]
