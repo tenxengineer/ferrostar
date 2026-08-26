@@ -25,6 +25,7 @@ use web_time::{Duration, SystemTime};
 use serde::{Deserialize, Serialize};
 
 use crate::models::{Route, UserLocation};
+use geo::{Distance, Haversine, Point};
 
 pub use location_class::{LocationClassState, UzLocationClass};
 #[cfg(feature = "std")]
@@ -119,6 +120,69 @@ pub struct UzmatchState {
     #[serde(default)]
     #[cfg_attr(feature = "uniffi", uniffi(default))]
     pub temporal_match: TemporalMatchState,
+    /// Route-cling state (vendor `Clinger`): route loss is stabilized, not per-fix.
+    #[serde(default)]
+    #[cfg_attr(feature = "uniffi", uniffi(default))]
+    pub cling: ClingState,
+}
+
+/// Vendor `Clinger` cling window (guidance config `CLING_TIME`).
+pub(crate) const CLING_TIME: Duration = Duration::from_secs(2);
+/// Vendor `Clinger` cling radius in meters (guidance config `CLING_DISTANCE`).
+pub(crate) const CLING_DISTANCE_METERS: f64 = 33.25;
+
+/// Last position and time the user was accepted as on-route, used to stabilize
+/// route loss the way the vendor `Clinger` does: a full off-route deviation is
+/// published only once the signal is far enough from this anchor in BOTH time
+/// (`CLING_TIME`) and distance (`CLING_DISTANCE_METERS`). Until then the user
+/// keeps clinging to the route, so one or two bad urban-canyon fixes cannot
+/// start a reroute.
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+pub struct ClingState {
+    /// Coordinates of the last on-route acceptance (snapped when bound, else raw).
+    #[serde(default)]
+    #[cfg_attr(feature = "uniffi", uniffi(default))]
+    pub anchor: Option<crate::models::GeographicCoordinate>,
+    /// Timestamp of the last on-route acceptance.
+    #[serde(default)]
+    #[cfg_attr(feature = "uniffi", uniffi(default))]
+    pub anchored_at: Option<SystemTime>,
+}
+
+impl ClingState {
+    /// Record an on-route acceptance (any non-full deviation outcome).
+    pub(crate) fn anchor_on_route(
+        &mut self,
+        coordinates: crate::models::GeographicCoordinate,
+        at: SystemTime,
+    ) {
+        self.anchor = Some(coordinates);
+        self.anchored_at = Some(at);
+    }
+
+    /// Whether a freshly computed full off-route deviation must still be held
+    /// back. Vendor `Clinger::isFarEnough`: releasing requires BOTH the time
+    /// and the distance thresholds to be exceeded. Once released the anchor is
+    /// cleared so a later deviation after a reroute starts fresh.
+    pub(crate) fn holds(&mut self, location: &UserLocation) -> bool {
+        let (Some(anchor), Some(anchored_at)) = (self.anchor, self.anchored_at) else {
+            return false;
+        };
+        let time_elapsed = location
+            .timestamp
+            .duration_since(anchored_at)
+            .map(|elapsed| elapsed >= CLING_TIME)
+            .unwrap_or(true);
+        let distance = Haversine.distance(Point::from(anchor), Point::from(location.coordinates));
+        if time_elapsed && distance >= CLING_DISTANCE_METERS {
+            self.anchor = None;
+            self.anchored_at = None;
+            false
+        } else {
+            true
+        }
+    }
 }
 
 impl Default for UzmatchState {
@@ -129,6 +193,7 @@ impl Default for UzmatchState {
             speed_history: Vec::new(),
             route_position: None,
             temporal_match: TemporalMatchState::default(),
+            cling: ClingState::default(),
         }
     }
 }
@@ -146,6 +211,7 @@ impl UzmatchState {
             speed_history: self.speed_history.clone(),
             route_position: self.route_position,
             temporal_match,
+            cling: self.cling,
         }
     }
 

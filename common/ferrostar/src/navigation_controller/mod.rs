@@ -334,7 +334,7 @@ impl Navigator for NavigationController {
                     .trip_state()
                     .deviation()
                     .unwrap_or(RouteDeviation::NoDeviation);
-                let (uzmatch_state, uzmatch_snapshot) =
+                let (mut uzmatch_state, uzmatch_snapshot) =
                     if let Some(route_index) = &self.route_snap_index {
                         let mut updated = state.uzmatch_state().update_with_index(
                             &location,
@@ -347,6 +347,9 @@ impl Navigator for NavigationController {
                         (state.uzmatch_state(), None)
                     };
                 let is_standing = uzmatch_snapshot.as_ref().is_some_and(|s| s.is_standing);
+                let uzmatch_ran = uzmatch_snapshot.is_some();
+                let matched_route_position =
+                    uzmatch_snapshot.as_ref().and_then(|s| s.route_position);
 
                 let is_arriving = remaining_steps.len() <= 2;
                 let mut intermediate_trip_state = self.create_intermediate_trip_state(
@@ -364,6 +367,13 @@ impl Navigator for NavigationController {
                         .config
                         .route_deviation_tracking
                         .check_route_deviation(&self.route, &intermediate_trip_state);
+                    let deviation = Self::cling_stabilized_deviation(
+                        &mut uzmatch_state,
+                        uzmatch_ran,
+                        matched_route_position,
+                        location,
+                        deviation,
+                    );
                     Self::apply_deviation_and_instruction_policy(
                         &mut intermediate_trip_state,
                         deviation,
@@ -419,6 +429,47 @@ impl Navigator for NavigationController {
 
 // Shared functionality for the navigation controller that is not exported by `UniFFI`.
 impl NavigationController {
+    /// Vendor `Clinger` route-loss stabilization (polyline port, no graph).
+    ///
+    /// A freshly computed `CompletelyOffRoute` is held back until the raw fix
+    /// is far enough from the last on-route acceptance in BOTH time (2 s) and
+    /// distance (33.25 m) — one or two bad urban-canyon fixes therefore cannot
+    /// escalate into a reroute. On-route outcomes (including the soft
+    /// `OffStepOnRoute`) re-anchor the cling. Inactive when uzmatch is off so
+    /// the upstream deviation contract is unchanged for plain Ferrostar users.
+    fn cling_stabilized_deviation(
+        uzmatch_state: &mut UzmatchState,
+        uzmatch_ran: bool,
+        matched_route_position: Option<uzmatch::RoutePosition>,
+        location: UserLocation,
+        deviation: RouteDeviation,
+    ) -> RouteDeviation {
+        if !uzmatch_ran {
+            return deviation;
+        }
+        let completely_off = matches!(
+            deviation,
+            RouteDeviation::Deviation {
+                kind: crate::deviation_detection::DeviationKind::CompletelyOffRoute { .. }
+            }
+        );
+        if completely_off {
+            if uzmatch_state.cling.holds(&location) {
+                RouteDeviation::NoDeviation
+            } else {
+                deviation
+            }
+        } else {
+            let anchor = matched_route_position
+                .map(|position| position.coordinates)
+                .unwrap_or(location.coordinates);
+            uzmatch_state
+                .cling
+                .anchor_on_route(anchor, location.timestamp);
+            deviation
+        }
+    }
+
     fn step_state(
         &self,
         location: UserLocation,
@@ -1704,6 +1755,93 @@ mod tests {
             matched.course_over_ground
         );
         assert!(snapped_user_location.coordinates.lat > 0.00009);
+    }
+
+    /// Vendor `Clinger` polyline port: a brief off-route excursion is held
+    /// back, and release requires BOTH thresholds; returning to the route
+    /// re-anchors the cling.
+    #[test]
+    fn uzmatch_cling_holds_then_releases_route_loss() {
+        use crate::deviation_detection::{DeviationKind, RouteDeviationTracking};
+        use crate::models::{GeographicCoordinate, Speed};
+        use crate::navigation_controller::models::{CourseFiltering, WaypointAdvanceMode};
+        use crate::navigation_controller::step_advance::conditions::ManualStepCondition;
+
+        let step1 = gen_dummy_route_step(0.0, 0.0, 0.001, 0.0);
+        let step2 = gen_dummy_route_step(0.001, 0.0, 0.002, 0.0);
+        let step3 = gen_dummy_route_step(0.002, 0.0, 0.002, 0.001);
+        let route = gen_route_from_steps(vec![step1, step2, step3]);
+
+        let config = NavigationControllerConfig {
+            waypoint_advance: WaypointAdvanceMode::WaypointWithinRange(100.0),
+            route_deviation_tracking: RouteDeviationTracking::StaticThreshold {
+                minimum_horizontal_accuracy: 32,
+                max_acceptable_deviation: 50.0,
+            },
+            snapped_location_course_filtering: CourseFiltering::Raw,
+            step_advance_condition: Arc::new(ManualStepCondition),
+            arrival_step_advance_condition: Arc::new(ManualStepCondition),
+            uzmatch: UzmatchConfig {
+                enabled: true,
+                ..UzmatchConfig::default()
+            },
+        };
+        let controller = NavigationController::new(route, config);
+
+        let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        // Moving fixes (speed 10 m/s) so the standing gate never engages.
+        let loc = |t_ms: u64, lng: f64, lat: f64| UserLocation {
+            coordinates: GeographicCoordinate { lng, lat },
+            horizontal_accuracy: 5.0,
+            course_over_ground: None,
+            timestamp: t0 + Duration::from_millis(t_ms),
+            speed: Some(Speed {
+                value: 10.0,
+                accuracy: None,
+            }),
+        };
+        let deviation = |state: &NavState| match state.trip_state() {
+            TripState::Navigating { deviation, .. } => deviation,
+            other => panic!("expected Navigating, got {other:?}"),
+        };
+
+        // On-route anchor at t=0.
+        let mut state = controller.get_initial_state(loc(0, 0.0008, 0.0));
+        state = controller.update_user_location(loc(500, 0.00085, 0.0), state);
+        assert_eq!(deviation(&state), RouteDeviation::NoDeviation);
+
+        // ~67 m off the line one second after the anchor: the raw deviation
+        // exceeds the 50 m threshold, but the cling window (2 s) holds it.
+        state = controller.update_user_location(loc(1_500, 0.00085, 0.0006), state);
+        assert_eq!(
+            deviation(&state),
+            RouteDeviation::NoDeviation,
+            "a brief excursion must cling to the route"
+        );
+
+        // Still off at t=3.5 s and ~67 m from the anchor: both vendor
+        // thresholds are exceeded, the loss is finally published.
+        state = controller.update_user_location(loc(3_500, 0.0009, 0.0006), state);
+        assert!(
+            matches!(
+                deviation(&state),
+                RouteDeviation::Deviation {
+                    kind: DeviationKind::CompletelyOffRoute { .. }
+                }
+            ),
+            "sustained loss must release the cling"
+        );
+
+        // Back on the route: re-anchored, and a fresh brief excursion is
+        // held again instead of escalating immediately.
+        state = controller.update_user_location(loc(4_500, 0.001, 0.0), state);
+        assert_eq!(deviation(&state), RouteDeviation::NoDeviation);
+        state = controller.update_user_location(loc(5_000, 0.00105, 0.0006), state);
+        assert_eq!(
+            deviation(&state),
+            RouteDeviation::NoDeviation,
+            "returning to the route must re-arm the cling"
+        );
     }
 
     /// UzNav P1a: while standing, route deviation is not recalculated, so
