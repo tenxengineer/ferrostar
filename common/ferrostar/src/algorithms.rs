@@ -331,6 +331,21 @@ pub fn calculate_trip_progress(
         travel_distance_to_end_of_step(snapped_location, current_step_linestring)
             .unwrap_or(current_step.distance);
 
+    calculate_trip_progress_from_distance(distance_to_next_maneuver, remaining_steps)
+}
+
+pub(crate) fn calculate_trip_progress_from_distance(
+    distance_to_next_maneuver: f64,
+    remaining_steps: &[RouteStep],
+) -> TripProgress {
+    let Some(current_step) = remaining_steps.first() else {
+        return TripProgress {
+            distance_to_next_maneuver: 0.0,
+            distance_remaining: 0.0,
+            duration_remaining: 0.0,
+        };
+    };
+
     // This could be improved with live traffic data along the route.
     // TODO: Figure out the best way to enable this use case
     let pct_remaining_current_step = if current_step.distance > 0f64 {

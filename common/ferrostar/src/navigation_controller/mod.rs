@@ -2,6 +2,7 @@
 
 pub mod models;
 pub mod step_advance;
+mod step_progress;
 pub mod uzmatch;
 pub mod waypoint_advance;
 
@@ -15,7 +16,8 @@ use crate::navigation_controller::models::{
 use crate::{
     algorithms::{
         advance_step, apply_snapped_course, calculate_trip_progress,
-        index_of_closest_segment_origin, snap_user_location_to_line,
+        calculate_trip_progress_from_distance, index_of_closest_segment_origin,
+        snap_user_location_to_line,
     },
     deviation_detection::RouteDeviation,
     models::{Route, RouteStep, UserLocation, Waypoint},
@@ -30,6 +32,7 @@ use geo::geometry::LineString;
 use models::{NavState, NavigationControllerConfig, StepAdvanceStatus, TripState};
 use std::clone::Clone;
 use std::sync::Arc;
+use step_progress::StepProgressIndex;
 use uzmatch::{RouteSnapIndex, UzmatchSnapshot, UzmatchState};
 #[cfg(feature = "wasm-bindgen")]
 use wasm_bindgen::{JsValue, prelude::wasm_bindgen};
@@ -84,6 +87,7 @@ pub struct NavigationController {
     route: Route,
     config: NavigationControllerConfig,
     route_snap_index: Option<RouteSnapIndex>,
+    step_progress_index: Option<StepProgressIndex>,
 }
 
 #[cfg_attr(feature = "uniffi", uniffi::export)]
@@ -95,10 +99,16 @@ impl NavigationController {
             .uzmatch
             .enabled
             .then(|| RouteSnapIndex::new(&route.geometry));
+        let step_progress_index = config
+            .uzmatch
+            .enabled
+            .then(|| StepProgressIndex::new(&route))
+            .flatten();
         Self {
             route,
             config,
             route_snap_index,
+            step_progress_index,
         }
     }
 }
@@ -137,18 +147,11 @@ impl Navigator for NavigationController {
             None
         };
 
-        // TODO: We could move this to the Route struct or NavigationController directly to only calculate it once.
-        let current_step_linestring = current_route_step.get_linestring();
-        let (current_step_geometry_index, snapped_user_location) = self.snap_user_to_match_or_line(
+        let (current_step_geometry_index, snapped_user_location, progress) = self.step_state(
             location,
-            &current_step_linestring,
-            uzmatch_snapshot.as_ref(),
-        );
-
-        let progress = calculate_trip_progress(
-            &snapped_user_location.into(),
-            &current_step_linestring,
+            current_route_step,
             &remaining_steps,
+            uzmatch_snapshot.as_ref(),
         );
 
         let visual_instruction = current_route_step
@@ -416,6 +419,79 @@ impl Navigator for NavigationController {
 
 // Shared functionality for the navigation controller that is not exported by `UniFFI`.
 impl NavigationController {
+    fn step_state(
+        &self,
+        location: UserLocation,
+        current_step: &RouteStep,
+        remaining_steps: &[RouteStep],
+        uzmatch: Option<&UzmatchSnapshot>,
+    ) -> (Option<u64>, UserLocation, models::TripProgress) {
+        self.step_state_from_match(location, remaining_steps, uzmatch)
+            .unwrap_or_else(|| {
+                // The independently supplied route and step geometries may not align.
+                // Preserve the legacy current-step projection for that public input.
+                let current_step_linestring = current_step.get_linestring();
+                let (current_step_geometry_index, snapped_user_location) =
+                    self.snap_user_to_match_or_line(location, &current_step_linestring, uzmatch);
+                let progress = calculate_trip_progress(
+                    &snapped_user_location.into(),
+                    &current_step_linestring,
+                    remaining_steps,
+                );
+                (current_step_geometry_index, snapped_user_location, progress)
+            })
+    }
+
+    fn step_state_from_match(
+        &self,
+        location: UserLocation,
+        remaining_steps: &[RouteStep],
+        uzmatch: Option<&UzmatchSnapshot>,
+    ) -> Option<(Option<u64>, UserLocation, models::TripProgress)> {
+        // `NavState` crosses FFI and can be restored or constructed outside this
+        // controller. Do not combine a route-global match with a foreign current
+        // step merely because the remaining-step count happens to match.
+        let current_step_index = self.route.steps.len().checked_sub(remaining_steps.len())?;
+        let route_step_geometry = &self.route.steps.get(current_step_index)?.geometry;
+        if route_step_geometry != &remaining_steps.first()?.geometry {
+            return None;
+        }
+
+        let route_position = uzmatch?.route_position?;
+        let indexed_position = self
+            .step_progress_index
+            .as_ref()?
+            .locate(route_position, remaining_steps.len())?;
+        let snapped_user_location = self.location_from_route_position(location, route_position);
+        let progress = calculate_trip_progress_from_distance(
+            indexed_position.distance_to_next_maneuver,
+            remaining_steps,
+        );
+        Some((
+            Some(indexed_position.current_step_geometry_index),
+            snapped_user_location,
+            progress,
+        ))
+    }
+
+    fn location_from_route_position(
+        &self,
+        location: UserLocation,
+        route_position: uzmatch::RoutePosition,
+    ) -> UserLocation {
+        let mut snapped_user_location = UserLocation {
+            coordinates: route_position.coordinates,
+            ..location
+        };
+        if matches!(
+            self.config.snapped_location_course_filtering,
+            models::CourseFiltering::SnapToRoute
+        ) {
+            snapped_user_location.course_over_ground = route_position.course_over_ground;
+        }
+        snapped_user_location
+    }
+
     /// Create an intermediate trip state with updated values,
     /// but does _not_ advance to the next step or handle arrival.
     ///
@@ -445,13 +521,14 @@ impl NavigationController {
                 summary: previous_summary,
                 ..
             } => {
-                // Use the temporal route match when available. The legacy
-                // current-step projection remains the disabled/off-route fallback.
-                let current_step_linestring = current_step.get_linestring();
-                let (current_step_geometry_index, snapped_user_location) = self
-                    .snap_user_to_match_or_line(
+                // Use the validated route-global position when it belongs to the
+                // current step. The legacy projection remains the disabled,
+                // off-route and non-aligning route fallback.
+                let (current_step_geometry_index, snapped_user_location, progress) = self
+                    .step_state(
                         current_user_location,
-                        &current_step_linestring,
+                        &current_step,
+                        &remaining_steps,
                         uzmatch.as_ref(),
                     );
 
@@ -461,12 +538,6 @@ impl NavigationController {
                     &current_user_location,
                     &previous_snapped_user_location,
                     &snapped_user_location,
-                );
-
-                let progress = calculate_trip_progress(
-                    &snapped_user_location.into(),
-                    &current_step_linestring,
-                    &remaining_steps,
                 );
 
                 let annotation_json = current_step_geometry_index
@@ -582,16 +653,7 @@ impl NavigationController {
             return self.snap_user_to_line(location, line);
         };
 
-        let mut snapped_user_location = UserLocation {
-            coordinates: route_position.coordinates,
-            ..location
-        };
-        if matches!(
-            self.config.snapped_location_course_filtering,
-            models::CourseFiltering::SnapToRoute
-        ) {
-            snapped_user_location.course_over_ground = route_position.course_over_ground;
-        }
+        let snapped_user_location = self.location_from_route_position(location, route_position);
 
         let current_step_geometry_index =
             index_of_closest_segment_origin(snapped_user_location, line);
