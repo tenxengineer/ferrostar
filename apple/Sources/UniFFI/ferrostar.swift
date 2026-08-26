@@ -4447,6 +4447,80 @@ public func FfiConverterTypeBoundingBox_lower(_ value: BoundingBox) -> RustBuffe
 
 
 /**
+ * Last position and time the user was accepted as on-route, used to stabilize
+ * route loss the way the vendor `Clinger` does: a full off-route deviation is
+ * published only once the signal is far enough from this anchor in BOTH time
+ * (`CLING_TIME`) and distance (`CLING_DISTANCE_METERS`). Until then the user
+ * keeps clinging to the route, so one or two bad urban-canyon fixes cannot
+ * start a reroute.
+ */
+public struct ClingState: Equatable, Hashable, Codable {
+    /**
+     * Coordinates of the last on-route acceptance (snapped when bound, else raw).
+     */
+    public var anchor: GeographicCoordinate?
+    /**
+     * Timestamp of the last on-route acceptance.
+     */
+    public var anchoredAt: Date?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Coordinates of the last on-route acceptance (snapped when bound, else raw).
+         */anchor: GeographicCoordinate? = nil, 
+        /**
+         * Timestamp of the last on-route acceptance.
+         */anchoredAt: Date? = nil) {
+        self.anchor = anchor
+        self.anchoredAt = anchoredAt
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension ClingState: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeClingState: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ClingState {
+        return
+            try ClingState(
+                anchor: FfiConverterOptionTypeGeographicCoordinate.read(from: &buf), 
+                anchoredAt: FfiConverterOptionTimestamp.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: ClingState, into buf: inout [UInt8]) {
+        FfiConverterOptionTypeGeographicCoordinate.write(value.anchor, into: &buf)
+        FfiConverterOptionTimestamp.write(value.anchoredAt, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeClingState_lift(_ buf: RustBuffer) throws -> ClingState {
+    return try FfiConverterTypeClingState.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeClingState_lower(_ value: ClingState) -> RustBuffer {
+    return FfiConverterTypeClingState.lower(value)
+}
+
+
+/**
  * Details about congestion for an incident.
  */
 public struct Congestion: Equatable, Hashable, Codable {
@@ -7265,6 +7339,10 @@ public struct UzmatchState: Equatable, Hashable, Codable {
      * Bounded candidate frontier used to preserve route continuity.
      */
     public var temporalMatch: TemporalMatchState
+    /**
+     * Route-cling state (vendor `Clinger`): route loss is stabilized, not per-fix.
+     */
+    public var cling: ClingState
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -7283,12 +7361,16 @@ public struct UzmatchState: Equatable, Hashable, Codable {
          */routePosition: RoutePosition?, 
         /**
          * Bounded candidate frontier used to preserve route continuity.
-         */temporalMatch: TemporalMatchState = TemporalMatchState()) {
+         */temporalMatch: TemporalMatchState = TemporalMatchState(), 
+        /**
+         * Route-cling state (vendor `Clinger`): route loss is stabilized, not per-fix.
+         */cling: ClingState = ClingState()) {
         self.standing = standing
         self.locationClass = locationClass
         self.speedHistory = speedHistory
         self.routePosition = routePosition
         self.temporalMatch = temporalMatch
+        self.cling = cling
     }
 
     
@@ -7311,7 +7393,8 @@ public struct FfiConverterTypeUzmatchState: FfiConverterRustBuffer {
                 locationClass: FfiConverterTypeLocationClassState.read(from: &buf), 
                 speedHistory: FfiConverterSequenceTypeSpeedSample.read(from: &buf), 
                 routePosition: FfiConverterOptionTypeRoutePosition.read(from: &buf), 
-                temporalMatch: FfiConverterTypeTemporalMatchState.read(from: &buf)
+                temporalMatch: FfiConverterTypeTemporalMatchState.read(from: &buf), 
+                cling: FfiConverterTypeClingState.read(from: &buf)
         )
     }
 
@@ -7321,6 +7404,7 @@ public struct FfiConverterTypeUzmatchState: FfiConverterRustBuffer {
         FfiConverterSequenceTypeSpeedSample.write(value.speedHistory, into: &buf)
         FfiConverterOptionTypeRoutePosition.write(value.routePosition, into: &buf)
         FfiConverterTypeTemporalMatchState.write(value.temporalMatch, into: &buf)
+        FfiConverterTypeClingState.write(value.cling, into: &buf)
     }
 }
 
