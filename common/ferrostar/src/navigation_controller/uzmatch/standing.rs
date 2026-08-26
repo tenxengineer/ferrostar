@@ -51,7 +51,11 @@ impl StandingState {
     /// is older than `signal_expiry`, history is reset before anything else.
     pub fn expire_if_stale(&mut self, now: SystemTime, signal_expiry: Duration) {
         if let Some(latest) = self.latest_signal {
-            if now.duration_since(latest).map(|d| d > signal_expiry).unwrap_or(false) {
+            if now
+                .duration_since(latest)
+                .map(|d| d > signal_expiry)
+                .unwrap_or(false)
+            {
                 self.reset();
             }
         }
