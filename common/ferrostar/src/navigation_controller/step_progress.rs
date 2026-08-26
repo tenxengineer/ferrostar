@@ -170,6 +170,26 @@ mod tests {
     }
 
     #[test]
+    fn production_navigate_response_builds_the_step_progress_index() {
+        // Real UzMap gateway `/navigate` response (Tashkent drive, 11 steps).
+        // If this ever regresses to `None`, every fix runs the legacy frame-local
+        // fallback and the vendor route-global distance model is silently dead.
+        use crate::routing_adapters::{RouteResponseParser, osrm::OsrmResponseParser};
+        let response = include_str!("../fixtures/uzmap_navigate_tashkent_response.json");
+        let routes = OsrmResponseParser::new(6)
+            .parse_response(response.as_bytes().to_vec())
+            .expect("gateway response must parse");
+        assert!(!routes.is_empty());
+        for route in &routes {
+            let index = StepProgressIndex::new(route);
+            assert!(
+                index.is_some(),
+                "gateway steps must tile the route geometry exactly"
+            );
+        }
+    }
+
+    #[test]
     fn maps_route_segment_to_the_current_step() {
         let route = aligned_route(vec![
             vec![
