@@ -47,7 +47,9 @@ pub struct TemporalCandidate {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct TemporalMatchState {
+    #[cfg_attr(feature = "uniffi", uniffi(default))]
     pub candidates: Vec<TemporalCandidate>,
+    #[cfg_attr(feature = "uniffi", uniffi(default))]
     pub previous_location: Option<UserLocation>,
 }
 
