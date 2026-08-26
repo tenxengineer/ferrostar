@@ -408,13 +408,21 @@ public protocol FerrostarCoreDelegate: AnyObject {
 
     // TODO: Ability to pause without totally stopping and clearing state
 
-    /// Stops navigation and stops requesting location updates (to save battery).
-    public func stopNavigation() {
+    /// Stops navigation and, by default, stops requesting location updates (to save battery).
+    ///
+    /// Pass `stopLocationUpdates: false` when the location provider outlives the trip —
+    /// an app that keeps showing the user puck in browse mode after guidance ends must not
+    /// have its only raw-fix stream silently turned off by session teardown. Location
+    /// ownership is then engine-lifetime, not trip-lifetime, and the app manages
+    /// `startUpdating`/`stopUpdating` itself.
+    public func stopNavigation(stopLocationUpdates: Bool = true) {
         navigationSession = nil
         route = nil
         state = nil
         queuedUtteranceIDs.removeAll()
-        locationProvider.stopUpdating()
+        if stopLocationUpdates {
+            locationProvider.stopUpdating()
+        }
         spokenInstructionObserver.stopAndClearQueue()
         widgetProvider?.terminate()
         lastRecalculationLocation = nil
