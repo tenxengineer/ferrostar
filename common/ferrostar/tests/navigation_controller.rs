@@ -6,13 +6,13 @@ use ferrostar::navigation_controller::create_navigator;
 use ferrostar::navigation_controller::models::{
     CourseFiltering, NavigationControllerConfig, TripState, WaypointAdvanceMode,
 };
-use ferrostar::navigation_controller::uzmatch::UzmatchConfig;
 use ferrostar::navigation_controller::step_advance::conditions::{
     DistanceToEndOfStepCondition, ManualStepCondition,
 };
 use ferrostar::navigation_controller::step_advance::{
     SerializableStepAdvanceCondition, StepAdvanceCondition,
 };
+use ferrostar::navigation_controller::uzmatch::UzmatchConfig;
 use ferrostar::routing_adapters::RouteResponseParser;
 use ferrostar::routing_adapters::osrm::OsrmResponseParser;
 use std::sync::Arc;
