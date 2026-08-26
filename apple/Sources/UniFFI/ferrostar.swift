@@ -6621,6 +6621,126 @@ public func FfiConverterTypeStreamedPosition_lower(_ value: StreamedPosition) ->
 
 
 /**
+ * A candidate retained between GPS signals.
+ */
+public struct TemporalCandidate: Equatable, Hashable, Codable {
+    public var routePosition: RoutePosition
+    /**
+     * Accumulated log likelihood, normalized so the frontier maximum is zero.
+     */
+    public var accumulatedLogLikelihood: Double
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(routePosition: RoutePosition, 
+        /**
+         * Accumulated log likelihood, normalized so the frontier maximum is zero.
+         */accumulatedLogLikelihood: Double) {
+        self.routePosition = routePosition
+        self.accumulatedLogLikelihood = accumulatedLogLikelihood
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension TemporalCandidate: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeTemporalCandidate: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> TemporalCandidate {
+        return
+            try TemporalCandidate(
+                routePosition: FfiConverterTypeRoutePosition.read(from: &buf), 
+                accumulatedLogLikelihood: FfiConverterDouble.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: TemporalCandidate, into buf: inout [UInt8]) {
+        FfiConverterTypeRoutePosition.write(value.routePosition, into: &buf)
+        FfiConverterDouble.write(value.accumulatedLogLikelihood, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTemporalCandidate_lift(_ buf: RustBuffer) throws -> TemporalCandidate {
+    return try FfiConverterTypeTemporalCandidate.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTemporalCandidate_lower(_ value: TemporalCandidate) -> RustBuffer {
+    return FfiConverterTypeTemporalCandidate.lower(value)
+}
+
+
+/**
+ * The bounded Viterbi frontier for the most recent accurate signal.
+ */
+public struct TemporalMatchState: Equatable, Hashable, Codable {
+    public var candidates: [TemporalCandidate]
+    public var previousLocation: UserLocation?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(candidates: [TemporalCandidate] = [], previousLocation: UserLocation? = nil) {
+        self.candidates = candidates
+        self.previousLocation = previousLocation
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension TemporalMatchState: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeTemporalMatchState: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> TemporalMatchState {
+        return
+            try TemporalMatchState(
+                candidates: FfiConverterSequenceTypeTemporalCandidate.read(from: &buf), 
+                previousLocation: FfiConverterOptionTypeUserLocation.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: TemporalMatchState, into buf: inout [UInt8]) {
+        FfiConverterSequenceTypeTemporalCandidate.write(value.candidates, into: &buf)
+        FfiConverterOptionTypeUserLocation.write(value.previousLocation, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTemporalMatchState_lift(_ buf: RustBuffer) throws -> TemporalMatchState {
+    return try FfiConverterTypeTemporalMatchState.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTemporalMatchState_lower(_ value: TemporalMatchState) -> RustBuffer {
+    return FfiConverterTypeTemporalMatchState.lower(value)
+}
+
+
+/**
  * High-level state describing progress through a route.
  */
 public struct TripProgress: Equatable, Hashable, Codable {
@@ -7027,8 +7147,9 @@ public func FfiConverterTypeUzmatchConfig_lower(_ value: UzmatchConfig) -> RustB
  */
 public struct UzmatchSnapshot: Equatable, Hashable, Codable {
     /**
-     * Route-global position from the heading-aware snap; `None` while the
-     * location class is not accurate (vendor does not bind coarse locations).
+     * Route-global position from the heading-aware snap; `None` when the
+     * current raw fix is not eligible for downstream snapping. The persistent
+     * location class can remain Fine briefly after a coarse fix.
      */
     public var routePosition: RoutePosition?
     /**
@@ -7050,8 +7171,9 @@ public struct UzmatchSnapshot: Equatable, Hashable, Codable {
     // declare one manually.
     public init(
         /**
-         * Route-global position from the heading-aware snap; `None` while the
-         * location class is not accurate (vendor does not bind coarse locations).
+         * Route-global position from the heading-aware snap; `None` when the
+         * current raw fix is not eligible for downstream snapping. The persistent
+         * location class can remain Fine briefly after a coarse fix.
          */routePosition: RoutePosition?, 
         /**
          * True when the user has been at/below the standing speed threshold for
@@ -7139,6 +7261,10 @@ public struct UzmatchState: Equatable, Hashable, Codable {
      * Latest route position (heading-aware snap).
      */
     public var routePosition: RoutePosition?
+    /**
+     * Bounded candidate frontier used to preserve route continuity.
+     */
+    public var temporalMatch: TemporalMatchState
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -7154,11 +7280,15 @@ public struct UzmatchState: Equatable, Hashable, Codable {
          */speedHistory: [SpeedSample], 
         /**
          * Latest route position (heading-aware snap).
-         */routePosition: RoutePosition?) {
+         */routePosition: RoutePosition?, 
+        /**
+         * Bounded candidate frontier used to preserve route continuity.
+         */temporalMatch: TemporalMatchState = TemporalMatchState()) {
         self.standing = standing
         self.locationClass = locationClass
         self.speedHistory = speedHistory
         self.routePosition = routePosition
+        self.temporalMatch = temporalMatch
     }
 
     
@@ -7180,7 +7310,8 @@ public struct FfiConverterTypeUzmatchState: FfiConverterRustBuffer {
                 standing: FfiConverterTypeStandingState.read(from: &buf), 
                 locationClass: FfiConverterTypeLocationClassState.read(from: &buf), 
                 speedHistory: FfiConverterSequenceTypeSpeedSample.read(from: &buf), 
-                routePosition: FfiConverterOptionTypeRoutePosition.read(from: &buf)
+                routePosition: FfiConverterOptionTypeRoutePosition.read(from: &buf), 
+                temporalMatch: FfiConverterTypeTemporalMatchState.read(from: &buf)
         )
     }
 
@@ -7189,6 +7320,7 @@ public struct FfiConverterTypeUzmatchState: FfiConverterRustBuffer {
         FfiConverterTypeLocationClassState.write(value.locationClass, into: &buf)
         FfiConverterSequenceTypeSpeedSample.write(value.speedHistory, into: &buf)
         FfiConverterOptionTypeRoutePosition.write(value.routePosition, into: &buf)
+        FfiConverterTypeTemporalMatchState.write(value.temporalMatch, into: &buf)
     }
 }
 
@@ -7551,7 +7683,7 @@ public struct ValhallaWaypointProperties: Equatable, Hashable, Codable {
          *
          * Defaults to `true`. This has the effect of converting a [`WaypointKind::Break`]
          * into a Valhalla `break_through`, and a [`WaypointKind::Via`] into a `through`.
-         */allowUturns: Bool? = nil,
+         */allowUturns: Bool? = nil, 
         /**
          * Location or business name.
          *
@@ -7610,7 +7742,7 @@ public struct FfiConverterTypeValhallaWaypointProperties: FfiConverterRustBuffer
                 streetSideMaxDistance: FfiConverterOptionUInt16.read(from: &buf), 
                 streetSideCutoff: FfiConverterOptionTypeValhallaRoadClass.read(from: &buf), 
                 searchFilter: FfiConverterOptionTypeValhallaLocationSearchFilter.read(from: &buf), 
-                allowUturns: FfiConverterOptionBool.read(from: &buf),
+                allowUturns: FfiConverterOptionBool.read(from: &buf), 
                 name: FfiConverterOptionString.read(from: &buf)
         )
     }
@@ -9414,8 +9546,8 @@ public struct FfiConverterTypeParsingError: FfiConverterRustBuffer {
         case let .InvalidRouteObject(error):
             writeInt(&buf, Int32(1))
             FfiConverterString.write(error, into: &buf)
-
-
+            
+        
         case let .InvalidGeometry(error):
             writeInt(&buf, Int32(2))
             FfiConverterString.write(error, into: &buf)
@@ -9531,12 +9663,12 @@ public struct FfiConverterTypeRecordingError: FfiConverterRustBuffer {
         
         case .RecordingNotEnabled:
             writeInt(&buf, Int32(2))
-
-
+        
+        
         case let .DeserializationError(error):
             writeInt(&buf, Int32(3))
             FfiConverterString.write(error, into: &buf)
-
+            
         }
     }
 }
@@ -12020,6 +12152,31 @@ fileprivate struct FfiConverterSequenceTypeSpokenInstruction: FfiConverterRustBu
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeSpokenInstruction.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeTemporalCandidate: FfiConverterRustBuffer {
+    typealias SwiftType = [TemporalCandidate]
+
+    public static func write(_ value: [TemporalCandidate], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeTemporalCandidate.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [TemporalCandidate] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [TemporalCandidate]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeTemporalCandidate.read(from: &buf))
         }
         return seq
     }
