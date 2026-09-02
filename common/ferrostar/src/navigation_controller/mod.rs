@@ -2104,6 +2104,26 @@ mod tests {
         max_acceptable_deviation: f64,
         uzmatch: UzmatchConfig,
     ) -> NavigationControllerConfig {
+        use crate::navigation_controller::step_advance::conditions::ManualStepCondition;
+        loss_config_with_advance(
+            max_acceptable_deviation,
+            uzmatch,
+            Arc::new(ManualStepCondition),
+        )
+    }
+
+    /// The apps' regular step advance: entry within 30 m of the maneuver (route-global
+    /// for bound fixes since P1b.7), exit 5 m past it, 32 m accuracy gate.
+    fn app_step_advance() -> Arc<dyn StepAdvanceCondition> {
+        use crate::navigation_controller::step_advance::step_advance_distance_entry_and_exit;
+        step_advance_distance_entry_and_exit(30, 5, 32)
+    }
+
+    fn loss_config_with_advance(
+        max_acceptable_deviation: f64,
+        uzmatch: UzmatchConfig,
+        step_advance_condition: Arc<dyn StepAdvanceCondition>,
+    ) -> NavigationControllerConfig {
         use crate::deviation_detection::RouteDeviationTracking;
         use crate::navigation_controller::models::{CourseFiltering, WaypointAdvanceMode};
         use crate::navigation_controller::step_advance::conditions::ManualStepCondition;
@@ -2114,7 +2134,7 @@ mod tests {
                 max_acceptable_deviation,
             },
             snapped_location_course_filtering: CourseFiltering::Raw,
-            step_advance_condition: Arc::new(ManualStepCondition),
+            step_advance_condition,
             arrival_step_advance_condition: Arc::new(ManualStepCondition),
             uzmatch,
         }
@@ -2261,8 +2281,14 @@ mod tests {
     /// straight past the LEFT turn. Returns the number of fixes past the turn
     /// vertex before the first full route loss, if any.
     fn fixes_past_turn_until_loss(course: impl Fn(f64) -> Option<f64>) -> Option<usize> {
-        let controller =
-            NavigationController::new(left_turn_route(), loss_config(25.0, walk_uzmatch_config()));
+        fixes_past_turn_until_loss_with(loss_config(25.0, walk_uzmatch_config()), course)
+    }
+
+    fn fixes_past_turn_until_loss_with(
+        config: NavigationControllerConfig,
+        course: impl Fn(f64) -> Option<f64>,
+    ) -> Option<usize> {
+        let controller = NavigationController::new(left_turn_route(), config);
         let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
         let step = WALK_MPS * DEG_PER_METER;
         let start_lng = 0.001 - 20.0 * DEG_PER_METER;
@@ -2350,12 +2376,40 @@ mod tests {
         }
     }
 
+    /// Same track under the apps' entry/exit step advance: the bound match
+    /// pins at the turn vertex with 0 m to the maneuver, so the step may
+    /// advance to the north leg while the walker keeps going east. The
+    /// detector reads the uzmatch position, not the current step, so the
+    /// budget must not change.
+    #[test]
+    fn heading_departure_straight_past_turn_with_app_step_advance() {
+        let config = loss_config_with_advance(25.0, walk_uzmatch_config(), app_step_advance());
+        assert_eq!(
+            fixes_past_turn_until_loss_with(config, |_| Some(90.0)),
+            Some(3)
+        );
+    }
+
     /// Spec "Wrong turn at the maneuver": the route turns LEFT (north), the
     /// walker turns RIGHT (south) at the vertex.
     #[test]
     fn heading_departure_wrong_turn() {
-        let controller =
-            NavigationController::new(left_turn_route(), loss_config(25.0, walk_uzmatch_config()));
+        wrong_turn_publishes_on_third_fix(loss_config(25.0, walk_uzmatch_config()));
+    }
+
+    /// Wrong turn under the apps' entry/exit step advance (see the straight
+    /// past-turn variant for why the step may have advanced).
+    #[test]
+    fn heading_departure_wrong_turn_with_app_step_advance() {
+        wrong_turn_publishes_on_third_fix(loss_config_with_advance(
+            25.0,
+            walk_uzmatch_config(),
+            app_step_advance(),
+        ));
+    }
+
+    fn wrong_turn_publishes_on_third_fix(config: NavigationControllerConfig) {
+        let controller = NavigationController::new(left_turn_route(), config);
         let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
         let step = WALK_MPS * DEG_PER_METER;
         let mut state = controller.get_initial_state(walker_fix(
