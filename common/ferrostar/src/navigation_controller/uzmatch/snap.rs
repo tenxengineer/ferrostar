@@ -288,21 +288,6 @@ impl RouteSnapIndex {
         frame_candidates
     }
 
-    /// Whether a matched position sits on a route vertex rather than in the
-    /// interior of its segment. A projection clamps to a vertex exactly when
-    /// the fix lies beyond the segment's end (or before its start), which is
-    /// what happens once a walker passes a maneuver without following it.
-    pub(crate) fn is_pinned_at_vertex(&self, position: &RoutePosition) -> bool {
-        let Some(segment) = usize::try_from(position.segment_index)
-            .ok()
-            .and_then(|index| self.segments.get(index))
-        else {
-            return false;
-        };
-        position.segment_offset_meters <= VERTEX_PIN_EPSILON_METERS
-            || position.segment_offset_meters >= segment.length_meters - VERTEX_PIN_EPSILON_METERS
-    }
-
     /// The direction the route continues in from a matched position. Inside a
     /// segment that is the segment's own bearing; at a segment's end vertex it
     /// is the bearing of the next non-degenerate segment, so a position pinned
@@ -702,23 +687,19 @@ mod tests {
         };
 
         let interior = position(0, east_length / 2.0);
-        assert!(!index.is_pinned_at_vertex(&interior));
         assert!((index.bearing_ahead(&interior).unwrap() - 90.0).abs() < 0.5);
 
         // Pinned at the end of the east segment: skip the zero-length segment,
         // report the north leg.
         let at_end = position(0, east_length);
-        assert!(index.is_pinned_at_vertex(&at_end));
         assert!(index.bearing_ahead(&at_end).unwrap().abs() < 0.5);
 
         // Pinned at the start of the north leg: its own bearing.
         let at_start = position(2, 0.0);
-        assert!(index.is_pinned_at_vertex(&at_start));
         assert!(index.bearing_ahead(&at_start).unwrap().abs() < 0.5);
 
         // Past the route end there is no direction ahead.
         let route_end = position(2, index.segments[2].length_meters);
-        assert!(index.is_pinned_at_vertex(&route_end));
         assert_eq!(index.bearing_ahead(&route_end), None);
     }
 }

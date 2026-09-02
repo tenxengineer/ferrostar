@@ -502,16 +502,23 @@ impl NavigationController {
     }
 
     /// `UzNav` heading-departure detector (design D2 of
-    /// `uznav-pedestrian-route-loss`). A fix counts toward the confirmation
-    /// streak only when ALL hold: the detector is enabled, the fix is bound to
-    /// the route, it carries a course whose accuracy is within the tolerance,
-    /// it is moving at or above `heading_departure_min_speed_mps`, the matched
-    /// position is pinned at a route vertex ("after the maneuver point" — a
-    /// mid-segment crossing of the avenue must not count), and the course
-    /// diverges from the route's forward direction by more than the
-    /// tolerance. Any other fix resets the streak. Returns true once the
-    /// streak reaches the configured confirmations; it saturates there so
-    /// every further diverging fix keeps publishing.
+    /// `uznav-pedestrian-route-loss`), the polyline analog of the vendor fair
+    /// tracker (`analyzer/libs/guidance/impl/fair_tracker-tpl.h`): the vendor
+    /// declares loss when the free-graph candidate beats the route candidate
+    /// and the raw heading agrees with the free direction (50° bias), held
+    /// back 3 s while recently on route. Without a graph the free candidate
+    /// is the raw fix itself, so the test is the course against the route's
+    /// forward bearing at the matched position. A fix counts toward the
+    /// streak only when ALL hold: the detector is enabled, the fix is bound
+    /// to the route, it carries a course whose accuracy is within the
+    /// tolerance, it is moving at or above `heading_departure_min_speed_mps`,
+    /// and the course diverges from the route's forward direction by more
+    /// than the tolerance. Any other fix resets the streak. Returns true once
+    /// the streak reaches the configured confirmations; it saturates there so
+    /// every further diverging fix keeps publishing. A vertex-pin gate was
+    /// tried and rejected: a wrong turn sharper than 90° projects INTERIOR
+    /// onto the pre-turn segment, so the pin never engaged (simulator probe:
+    /// +19 s instead of +3 s).
     fn heading_departure_confirmed(
         &self,
         uzmatch_state: &mut UzmatchState,
@@ -534,9 +541,6 @@ impl NavigationController {
             }
             let speed = location.speed?.value;
             if speed.is_nan() || speed < config.heading_departure_min_speed_mps {
-                return None;
-            }
-            if !index.is_pinned_at_vertex(&position) {
                 return None;
             }
             let ahead = index.bearing_ahead(&position)?;
@@ -2578,15 +2582,15 @@ mod tests {
         }
     }
 
-    /// Not in the design table but implied by the sidewalk requirement: a
-    /// walker crossing the avenue perpendicular to a route that runs along it
-    /// holds a 90° course for many seconds while staying inside 25 m. The
-    /// heading detector only counts fixes pinned at a route vertex ("after
-    /// the maneuver point"), so a mid-segment crossing never publishes.
+    /// Vendor parity, not a spec scenario: a walker crossing the avenue
+    /// perpendicular to a route that runs along it holds a 90° course. The
+    /// vendor fair tracker binds that to the crosswalk edge and declares loss
+    /// after its 3 s guard; the polyline analog publishes on the 3rd diverging
+    /// moving fix and re-arms as soon as the course agrees again on the far
+    /// side. A vertex-pin gate that suppressed this also suppressed real
+    /// wrong turns sharper than 90°, so the crossing is accepted.
     #[test]
-    fn perpendicular_crossing_mid_segment_does_not_publish() {
-        // A long east step so the north leg (445 m ahead) is outside the snap
-        // bias: the crossing fix can only bind to the segment being crossed.
+    fn perpendicular_crossing_mid_segment_publishes_like_vendor_fair_track() {
         let step1 = gen_dummy_route_step(0.0, 0.0, 0.004, 0.0);
         let step2 = gen_dummy_route_step(0.004, 0.0, 0.004, 0.001);
         let route = gen_route_from_steps(vec![step1, step2]);
@@ -2599,7 +2603,7 @@ mod tests {
             walker_fix(t0, 1, 0.0004 + step, 0.0, Some(90.0), WALK_MPS),
             state,
         );
-        // Cross north for 10 s (14 m), then walk east on the far side.
+        let mut published_at = None;
         for n in 1..=10u64 {
             state = controller.update_user_location(
                 walker_fix(
@@ -2612,8 +2616,16 @@ mod tests {
                 ),
                 state,
             );
-            assert!(!is_off_route(&state), "crossing published at fix {n}");
+            if published_at.is_none() && is_off_route(&state) {
+                published_at = Some(n);
+            }
         }
+        assert_eq!(
+            published_at,
+            Some(3),
+            "crossing must publish on the 3rd diverging fix"
+        );
+        // Far side, walking along the route again: no loss, streak re-armed.
         for n in 1..=10u64 {
             state = controller.update_user_location(
                 walker_fix(
