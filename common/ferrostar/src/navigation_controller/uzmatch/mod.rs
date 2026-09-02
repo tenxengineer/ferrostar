@@ -66,6 +66,61 @@ pub struct UzmatchConfig {
     /// UzNav policy (no vendor equivalent extracted): a location with
     /// horizontal accuracy at or below this feeds the LCSM as a *fine* fix.
     pub fine_accuracy_threshold_m: f64,
+    /// Vendor `Clinger` cling radius (guidance config `CLING_DISTANCE`,
+    /// 33.25 m): a full route loss is held back until the fix is at least this
+    /// far from the last on-route anchor. The vendor ships one automotive
+    /// value; the pedestrian profile (UzNav's own number) lowers it.
+    #[serde(default = "default_cling_distance_m")]
+    #[cfg_attr(feature = "uniffi", uniffi(default = 33.25))]
+    pub cling_distance_m: f64,
+    /// Vendor `Clinger` cling window (guidance config `CLING_TIME`, 2000 ms).
+    #[serde(default = "default_cling_time_ms")]
+    #[cfg_attr(feature = "uniffi", uniffi(default = 2000))]
+    pub cling_time_ms: u64,
+    /// `UzNav` pedestrian route-loss detector (no vendor equivalent: the
+    /// vendor's pedestrian guidance is a separate product outside the tree).
+    /// When on, a walker whose credible course diverges from the route's
+    /// forward direction at a route vertex for
+    /// `heading_departure_confirmations` consecutive moving fixes is
+    /// published as completely off route without waiting for the distance
+    /// threshold or the cling radius.
+    #[serde(default)]
+    #[cfg_attr(feature = "uniffi", uniffi(default = false))]
+    pub heading_departure_enabled: bool,
+    /// Fixes slower than this (m/s) never count as a heading departure and
+    /// reset the confirmation streak.
+    #[serde(default = "default_heading_departure_min_speed_mps")]
+    #[cfg_attr(feature = "uniffi", uniffi(default = 0.8))]
+    pub heading_departure_min_speed_mps: f64,
+    /// Course-vs-route divergence (degrees) above which a fix counts. A course
+    /// whose reported accuracy is worse than this is treated as no course.
+    #[serde(default = "default_heading_departure_tolerance_deg")]
+    #[cfg_attr(feature = "uniffi", uniffi(default = 60.0))]
+    pub heading_departure_tolerance_deg: f64,
+    /// Consecutive diverging moving fixes required before publishing.
+    #[serde(default = "default_heading_departure_confirmations")]
+    #[cfg_attr(feature = "uniffi", uniffi(default = 3))]
+    pub heading_departure_confirmations: u8,
+}
+
+fn default_cling_distance_m() -> f64 {
+    CLING_DISTANCE_METERS
+}
+
+fn default_cling_time_ms() -> u64 {
+    CLING_TIME_MS
+}
+
+fn default_heading_departure_min_speed_mps() -> f64 {
+    0.8
+}
+
+fn default_heading_departure_tolerance_deg() -> f64 {
+    60.0
+}
+
+fn default_heading_departure_confirmations() -> u8 {
+    3
 }
 
 impl Default for UzmatchConfig {
@@ -79,6 +134,12 @@ impl Default for UzmatchConfig {
             snap_heading_stddev_deg: 6.0,
             snap_heading_min_speed_mps: 4.0,
             fine_accuracy_threshold_m: 25.0,
+            cling_distance_m: default_cling_distance_m(),
+            cling_time_ms: default_cling_time_ms(),
+            heading_departure_enabled: false,
+            heading_departure_min_speed_mps: default_heading_departure_min_speed_mps(),
+            heading_departure_tolerance_deg: default_heading_departure_tolerance_deg(),
+            heading_departure_confirmations: default_heading_departure_confirmations(),
         }
     }
 }
@@ -124,17 +185,25 @@ pub struct UzmatchState {
     #[serde(default)]
     #[cfg_attr(feature = "uniffi", uniffi(default))]
     pub cling: ClingState,
+    /// Consecutive moving fixes whose credible course diverged from the
+    /// route's forward direction at a vertex (`UzNav` heading-departure
+    /// detector). Saturates once the configured confirmations are reached.
+    #[serde(default)]
+    #[cfg_attr(feature = "uniffi", uniffi(default))]
+    pub heading_departure_streak: u8,
 }
 
-/// Vendor `Clinger` cling window (guidance config `CLING_TIME`).
-pub(crate) const CLING_TIME: Duration = Duration::from_secs(2);
+/// Vendor `Clinger` cling window (guidance config `CLING_TIME`). Documented
+/// default of [`UzmatchConfig::cling_time_ms`]; the controller reads the config.
+pub(crate) const CLING_TIME_MS: u64 = 2000;
 /// Vendor `Clinger` cling radius in meters (guidance config `CLING_DISTANCE`).
+/// Documented default of [`UzmatchConfig::cling_distance_m`].
 pub(crate) const CLING_DISTANCE_METERS: f64 = 33.25;
 
 /// Last position and time the user was accepted as on-route, used to stabilize
 /// route loss the way the vendor `Clinger` does: a full off-route deviation is
 /// published only once the signal is far enough from this anchor in BOTH time
-/// (`CLING_TIME`) and distance (`CLING_DISTANCE_METERS`). Until then the user
+/// (`cling_time_ms`) and distance (`cling_distance_m`). Until then the user
 /// keeps clinging to the route, so one or two bad urban-canyon fixes cannot
 /// start a reroute.
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
@@ -165,17 +234,18 @@ impl ClingState {
     /// back. Vendor `Clinger::isFarEnough`: releasing requires BOTH the time
     /// and the distance thresholds to be exceeded. Once released the anchor is
     /// cleared so a later deviation after a reroute starts fresh.
-    pub(crate) fn holds(&mut self, location: &UserLocation) -> bool {
+    pub(crate) fn holds(&mut self, location: &UserLocation, config: &UzmatchConfig) -> bool {
         let (Some(anchor), Some(anchored_at)) = (self.anchor, self.anchored_at) else {
             return false;
         };
+        let cling_time = Duration::from_millis(config.cling_time_ms);
         let time_elapsed = location
             .timestamp
             .duration_since(anchored_at)
-            .map(|elapsed| elapsed >= CLING_TIME)
+            .map(|elapsed| elapsed >= cling_time)
             .unwrap_or(true);
         let distance = Haversine.distance(Point::from(anchor), Point::from(location.coordinates));
-        if time_elapsed && distance >= CLING_DISTANCE_METERS {
+        if time_elapsed && distance >= config.cling_distance_m {
             self.anchor = None;
             self.anchored_at = None;
             false
@@ -194,6 +264,7 @@ impl Default for UzmatchState {
             route_position: None,
             temporal_match: TemporalMatchState::default(),
             cling: ClingState::default(),
+            heading_departure_streak: 0,
         }
     }
 }
@@ -212,6 +283,7 @@ impl UzmatchState {
             route_position: self.route_position,
             temporal_match,
             cling: self.cling,
+            heading_departure_streak: self.heading_departure_streak,
         }
     }
 

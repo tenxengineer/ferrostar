@@ -29,6 +29,7 @@ use crate::{
 };
 use chrono::Utc;
 use geo::geometry::LineString;
+use geo::{Distance, Haversine, Point};
 use models::{NavState, NavigationControllerConfig, StepAdvanceStatus, TripState};
 use std::clone::Clone;
 use std::sync::Arc;
@@ -367,7 +368,7 @@ impl Navigator for NavigationController {
                         .config
                         .route_deviation_tracking
                         .check_route_deviation(&self.route, &intermediate_trip_state);
-                    let deviation = Self::cling_stabilized_deviation(
+                    let deviation = self.cling_stabilized_deviation(
                         &mut uzmatch_state,
                         uzmatch_ran,
                         matched_route_position,
@@ -429,32 +430,62 @@ impl Navigator for NavigationController {
 
 // Shared functionality for the navigation controller that is not exported by `UniFFI`.
 impl NavigationController {
-    /// Vendor `Clinger` route-loss stabilization (polyline port, no graph).
+    /// Vendor `Clinger` route-loss stabilization (polyline port, no graph),
+    /// plus the `UzNav` heading-departure detector.
     ///
     /// A freshly computed `CompletelyOffRoute` is held back until the raw fix
-    /// is far enough from the last on-route acceptance in BOTH time (2 s) and
-    /// distance (33.25 m) — one or two bad urban-canyon fixes therefore cannot
-    /// escalate into a reroute. On-route outcomes (including the soft
-    /// `OffStepOnRoute`) re-anchor the cling. Inactive when uzmatch is off so
-    /// the upstream deviation contract is unchanged for plain Ferrostar users.
+    /// is far enough from the last on-route acceptance in BOTH time
+    /// (`cling_time_ms`) and distance (`cling_distance_m`) — one or two bad
+    /// urban-canyon fixes therefore cannot escalate into a reroute. On-route
+    /// outcomes (including the soft `OffStepOnRoute`) re-anchor the cling.
+    ///
+    /// When `heading_departure_enabled`, a credible course that keeps
+    /// diverging from the route's forward direction at a vertex publishes the
+    /// loss BYPASSING the cling: direction proves intent before distance can.
+    /// Inactive when uzmatch is off so the upstream deviation contract is
+    /// unchanged for plain Ferrostar users.
     fn cling_stabilized_deviation(
+        &self,
         uzmatch_state: &mut UzmatchState,
         uzmatch_ran: bool,
         matched_route_position: Option<uzmatch::RoutePosition>,
         location: UserLocation,
         deviation: RouteDeviation,
     ) -> RouteDeviation {
+        use crate::deviation_detection::DeviationKind;
+
         if !uzmatch_ran {
             return deviation;
+        }
+        if self.heading_departure_confirmed(uzmatch_state, matched_route_position, &location) {
+            let deviation_from_route_line = match deviation {
+                RouteDeviation::Deviation {
+                    kind:
+                        DeviationKind::CompletelyOffRoute {
+                            deviation_from_route_line,
+                        },
+                } => deviation_from_route_line,
+                _ => matched_route_position.map_or(0.0, |position| {
+                    Haversine.distance(
+                        Point::from(position.coordinates),
+                        Point::from(location.coordinates),
+                    )
+                }),
+            };
+            return RouteDeviation::Deviation {
+                kind: DeviationKind::CompletelyOffRoute {
+                    deviation_from_route_line,
+                },
+            };
         }
         let completely_off = matches!(
             deviation,
             RouteDeviation::Deviation {
-                kind: crate::deviation_detection::DeviationKind::CompletelyOffRoute { .. }
+                kind: DeviationKind::CompletelyOffRoute { .. }
             }
         );
         if completely_off {
-            if uzmatch_state.cling.holds(&location) {
+            if uzmatch_state.cling.holds(&location, &self.config.uzmatch) {
                 RouteDeviation::NoDeviation
             } else {
                 deviation
@@ -467,6 +498,62 @@ impl NavigationController {
                 .cling
                 .anchor_on_route(anchor, location.timestamp);
             deviation
+        }
+    }
+
+    /// `UzNav` heading-departure detector (design D2 of
+    /// `uznav-pedestrian-route-loss`). A fix counts toward the confirmation
+    /// streak only when ALL hold: the detector is enabled, the fix is bound to
+    /// the route, it carries a course whose accuracy is within the tolerance,
+    /// it is moving at or above `heading_departure_min_speed_mps`, the matched
+    /// position is pinned at a route vertex ("after the maneuver point" — a
+    /// mid-segment crossing of the avenue must not count), and the course
+    /// diverges from the route's forward direction by more than the
+    /// tolerance. Any other fix resets the streak. Returns true once the
+    /// streak reaches the configured confirmations; it saturates there so
+    /// every further diverging fix keeps publishing.
+    fn heading_departure_confirmed(
+        &self,
+        uzmatch_state: &mut UzmatchState,
+        matched_route_position: Option<uzmatch::RoutePosition>,
+        location: &UserLocation,
+    ) -> bool {
+        let config = &self.config.uzmatch;
+        if !config.heading_departure_enabled {
+            uzmatch_state.heading_departure_streak = 0;
+            return false;
+        }
+        let diverging = (|| {
+            let position = matched_route_position?;
+            let index = self.route_snap_index.as_ref()?;
+            let course = location.course_over_ground?;
+            if course.accuracy.is_some_and(|accuracy| {
+                f64::from(accuracy) > config.heading_departure_tolerance_deg
+            }) {
+                return None;
+            }
+            let speed = location.speed?.value;
+            if speed.is_nan() || speed < config.heading_departure_min_speed_mps {
+                return None;
+            }
+            if !index.is_pinned_at_vertex(&position) {
+                return None;
+            }
+            let ahead = index.bearing_ahead(&position)?;
+            Some(
+                uzmatch::snap::heading_difference(f64::from(course.degrees), ahead)
+                    > config.heading_departure_tolerance_deg,
+            )
+        })();
+        if diverging == Some(true) {
+            uzmatch_state.heading_departure_streak = uzmatch_state
+                .heading_departure_streak
+                .saturating_add(1)
+                .min(config.heading_departure_confirmations.max(1));
+            uzmatch_state.heading_departure_streak >= config.heading_departure_confirmations
+        } else {
+            uzmatch_state.heading_departure_streak = 0;
+            false
         }
     }
 
@@ -1983,6 +2070,553 @@ mod tests {
             matches!(deviation_of(&state), Some(RouteDeviation::Deviation { .. })),
             "deviation must fire once moving off-route, got {:?}",
             deviation_of(&state)
+        );
+    }
+    // ---------------------------------------------------------------------
+    // UzNav pedestrian route-loss profile (openspec uznav-pedestrian-route-loss)
+    // ---------------------------------------------------------------------
+
+    /// Route: 111 m east, then a LEFT turn north (111 m), then east again.
+    fn left_turn_route() -> Route {
+        let step1 = gen_dummy_route_step(0.0, 0.0, 0.001, 0.0);
+        let step2 = gen_dummy_route_step(0.001, 0.0, 0.001, 0.001);
+        let step3 = gen_dummy_route_step(0.001, 0.001, 0.002, 0.001);
+        gen_route_from_steps(vec![step1, step2, step3])
+    }
+
+    /// Pedestrian profile from design D3 (numbers are UzNav's own; the vendor
+    /// ships one automotive constant set and no pedestrian Clinger).
+    fn walk_uzmatch_config() -> UzmatchConfig {
+        UzmatchConfig {
+            enabled: true,
+            snap_heading_min_speed_mps: 0.8,
+            cling_distance_m: 12.0,
+            cling_time_ms: 2000,
+            heading_departure_enabled: true,
+            heading_departure_min_speed_mps: 0.8,
+            heading_departure_tolerance_deg: 60.0,
+            heading_departure_confirmations: 3,
+            ..UzmatchConfig::default()
+        }
+    }
+
+    fn loss_config(
+        max_acceptable_deviation: f64,
+        uzmatch: UzmatchConfig,
+    ) -> NavigationControllerConfig {
+        use crate::deviation_detection::RouteDeviationTracking;
+        use crate::navigation_controller::models::{CourseFiltering, WaypointAdvanceMode};
+        use crate::navigation_controller::step_advance::conditions::ManualStepCondition;
+        NavigationControllerConfig {
+            waypoint_advance: WaypointAdvanceMode::WaypointWithinRange(100.0),
+            route_deviation_tracking: RouteDeviationTracking::StaticThreshold {
+                minimum_horizontal_accuracy: 32,
+                max_acceptable_deviation,
+            },
+            snapped_location_course_filtering: CourseFiltering::Raw,
+            step_advance_condition: Arc::new(ManualStepCondition),
+            arrival_step_advance_condition: Arc::new(ManualStepCondition),
+            uzmatch,
+        }
+    }
+
+    /// Degrees of longitude/latitude per metre near the equator.
+    const DEG_PER_METER: f64 = 1.0 / 111_320.0;
+    const WALK_MPS: f64 = 1.4;
+
+    fn walker_fix(
+        t0: SystemTime,
+        second: u64,
+        lng: f64,
+        lat: f64,
+        course_deg: Option<f64>,
+        speed_mps: f64,
+    ) -> UserLocation {
+        use crate::models::{CourseOverGround, GeographicCoordinate, Speed};
+        UserLocation {
+            coordinates: GeographicCoordinate { lng, lat },
+            horizontal_accuracy: 5.0,
+            course_over_ground: course_deg.map(|deg| CourseOverGround::new(deg, Some(10))),
+            timestamp: t0 + Duration::from_secs(second),
+            speed: Some(Speed {
+                value: speed_mps,
+                accuracy: None,
+            }),
+        }
+    }
+
+    fn is_off_route(state: &NavState) -> bool {
+        state
+            .trip_state()
+            .deviation()
+            .is_some_and(|deviation| deviation.is_completely_off_route())
+    }
+
+    /// Replay of the `uzmatch_cling_holds_then_releases_route_loss` track under
+    /// the DEFAULT config: the drive profile is the vendor constants and the
+    /// published deviation sequence is byte-identical to the pre-profile core.
+    #[test]
+    fn drive_profile_matches_vendor_constants() {
+        use crate::models::{GeographicCoordinate, Speed};
+
+        let defaults = UzmatchConfig::default();
+        assert_eq!(defaults.cling_distance_m, 33.25);
+        assert_eq!(defaults.cling_time_ms, 2000);
+        assert_eq!(defaults.snap_heading_min_speed_mps, 4.0);
+        assert!(!defaults.heading_departure_enabled);
+
+        let step1 = gen_dummy_route_step(0.0, 0.0, 0.001, 0.0);
+        let step2 = gen_dummy_route_step(0.001, 0.0, 0.002, 0.0);
+        let step3 = gen_dummy_route_step(0.002, 0.0, 0.002, 0.001);
+        let route = gen_route_from_steps(vec![step1, step2, step3]);
+        let controller = NavigationController::new(
+            route,
+            loss_config(
+                50.0,
+                UzmatchConfig {
+                    enabled: true,
+                    ..UzmatchConfig::default()
+                },
+            ),
+        );
+        let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        let loc = |t_ms: u64, lng: f64, lat: f64| UserLocation {
+            coordinates: GeographicCoordinate { lng, lat },
+            horizontal_accuracy: 5.0,
+            course_over_ground: None,
+            timestamp: t0 + Duration::from_millis(t_ms),
+            speed: Some(Speed {
+                value: 10.0,
+                accuracy: None,
+            }),
+        };
+        let track = [
+            (500, 0.00085, 0.0),
+            (1_500, 0.00085, 0.0006),
+            (3_500, 0.0009, 0.0006),
+            (4_500, 0.001, 0.0),
+            (5_000, 0.00105, 0.0006),
+        ];
+        let mut state = controller.get_initial_state(loc(0, 0.0008, 0.0));
+        let published: Vec<bool> = track
+            .iter()
+            .map(|(t_ms, lng, lat)| {
+                state = controller.update_user_location(loc(*t_ms, *lng, *lat), state.clone());
+                is_off_route(&state)
+            })
+            .collect();
+        assert_eq!(
+            published,
+            [false, false, true, false, false],
+            "the drive profile must publish exactly the vendor Clinger sequence"
+        );
+    }
+
+    /// With the pedestrian cling radius (12 m) a sustained loss is released
+    /// ~22 m from the anchor, where the vendor radius (33.25 m) still holds.
+    #[test]
+    fn walk_cling_radius_releases_earlier() {
+        use crate::models::{GeographicCoordinate, Speed};
+
+        let route = left_turn_route();
+        let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        let loc = |t_ms: u64, lng: f64, lat: f64| UserLocation {
+            coordinates: GeographicCoordinate { lng, lat },
+            horizontal_accuracy: 5.0,
+            course_over_ground: None,
+            timestamp: t0 + Duration::from_millis(t_ms),
+            speed: Some(Speed {
+                value: 1.4,
+                accuracy: None,
+            }),
+        };
+        // Anchor on the first step, then a fix ~22 m north of the line, 3 s later.
+        let replay = |uzmatch: UzmatchConfig| {
+            let controller = NavigationController::new(route.clone(), loss_config(10.0, uzmatch));
+            let state = controller.get_initial_state(loc(0, 0.0005, 0.0));
+            let state = controller.update_user_location(loc(1_000, 0.00051, 0.0), state);
+            assert!(!is_off_route(&state));
+            let state = controller.update_user_location(loc(4_000, 0.00052, 0.0002), state);
+            is_off_route(&state)
+        };
+
+        assert!(
+            !replay(UzmatchConfig {
+                enabled: true,
+                ..UzmatchConfig::default()
+            }),
+            "22 m from the anchor is inside the vendor cling radius"
+        );
+        assert!(
+            replay(UzmatchConfig {
+                enabled: true,
+                cling_distance_m: 12.0,
+                ..UzmatchConfig::default()
+            }),
+            "22 m from the anchor is outside the pedestrian cling radius"
+        );
+    }
+
+    /// Walk the first step east at 1.4 m/s with course, then keep going
+    /// straight past the LEFT turn. Returns the number of fixes past the turn
+    /// vertex before the first full route loss, if any.
+    fn fixes_past_turn_until_loss(course: impl Fn(f64) -> Option<f64>) -> Option<usize> {
+        let controller =
+            NavigationController::new(left_turn_route(), loss_config(25.0, walk_uzmatch_config()));
+        let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        let step = WALK_MPS * DEG_PER_METER;
+        let start_lng = 0.001 - 20.0 * DEG_PER_METER;
+        let mut state = controller.get_initial_state(walker_fix(
+            t0,
+            0,
+            start_lng,
+            0.0,
+            course(start_lng),
+            WALK_MPS,
+        ));
+        let mut past_turn = 0usize;
+        for second in 1..=40u64 {
+            let lng = start_lng + step * second as f64;
+            state = controller.update_user_location(
+                walker_fix(t0, second, lng, 0.0, course(lng), WALK_MPS),
+                state,
+            );
+            if lng > 0.001 {
+                past_turn += 1;
+            }
+            if is_off_route(&state) {
+                assert!(
+                    past_turn > 0,
+                    "route loss before the turn at second {second}"
+                );
+                return Some(past_turn);
+            }
+        }
+        None
+    }
+
+    /// Spec "Straight past a left turn": with a credible course the loss is
+    /// published on the 3rd moving fix past the maneuver (≈ +3 s), not when
+    /// the distance threshold is finally crossed.
+    #[test]
+    fn heading_departure_straight_past_turn_publishes_within_confirmations() {
+        assert_eq!(fixes_past_turn_until_loss(|_| Some(90.0)), Some(3));
+    }
+
+    /// Spec "Fixes without a course fall back to distance": no heading term,
+    /// the pedestrian distance profile (25 m / 12 m cling) publishes on its
+    /// own, well within +25 s.
+    #[test]
+    fn no_course_falls_back_to_distance() {
+        let fixes = fixes_past_turn_until_loss(|_| None).expect("distance fallback must publish");
+        assert!(
+            fixes > 3,
+            "without a course nothing may publish early: {fixes}"
+        );
+        assert!(
+            fixes <= 25,
+            "distance fallback must publish within 25 s: {fixes}"
+        );
+    }
+
+    /// A course whose accuracy is worse than the tolerance is not credible and
+    /// behaves like no course at all.
+    #[test]
+    fn incredible_course_falls_back_to_distance() {
+        use crate::models::CourseOverGround;
+        let controller =
+            NavigationController::new(left_turn_route(), loss_config(25.0, walk_uzmatch_config()));
+        let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        let step = WALK_MPS * DEG_PER_METER;
+        let start_lng = 0.001 - 10.0 * DEG_PER_METER;
+        let fix = |second: u64| UserLocation {
+            course_over_ground: Some(CourseOverGround::new(90.0, Some(120))),
+            ..walker_fix(
+                t0,
+                second,
+                start_lng + step * second as f64,
+                0.0,
+                None,
+                WALK_MPS,
+            )
+        };
+        let mut state = controller.get_initial_state(fix(0));
+        for second in 1..=12 {
+            state = controller.update_user_location(fix(second), state);
+            assert!(
+                !is_off_route(&state),
+                "an incredible course published at second {second}"
+            );
+        }
+    }
+
+    /// Spec "Wrong turn at the maneuver": the route turns LEFT (north), the
+    /// walker turns RIGHT (south) at the vertex.
+    #[test]
+    fn heading_departure_wrong_turn() {
+        let controller =
+            NavigationController::new(left_turn_route(), loss_config(25.0, walk_uzmatch_config()));
+        let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        let step = WALK_MPS * DEG_PER_METER;
+        let mut state = controller.get_initial_state(walker_fix(
+            t0,
+            0,
+            0.001 - 4.0 * step,
+            0.0,
+            Some(90.0),
+            WALK_MPS,
+        ));
+        for second in 1..=3u64 {
+            let lng = 0.001 - (4.0 - second as f64) * step;
+            state = controller.update_user_location(
+                walker_fix(t0, second, lng, 0.0, Some(90.0), WALK_MPS),
+                state,
+            );
+            assert!(
+                !is_off_route(&state),
+                "approach fix {second} must stay on route"
+            );
+        }
+        // At the vertex, turn right and walk south.
+        let mut published_at = None;
+        for n in 1..=6u64 {
+            let lat = -(step * n as f64);
+            state = controller.update_user_location(
+                walker_fix(t0, 4 + n, 0.001, lat, Some(180.0), WALK_MPS),
+                state,
+            );
+            if is_off_route(&state) {
+                published_at = Some(n);
+                break;
+            }
+        }
+        assert_eq!(
+            published_at,
+            Some(3),
+            "wrong turn must publish on the 3rd diverging fix"
+        );
+    }
+
+    /// Spec "Brief heading noise while on route": the course lags the turn by
+    /// two fixes (typical GPS behaviour when a walker rounds a corner), then
+    /// agrees again. Nothing may publish.
+    #[test]
+    fn heading_noise_two_fixes_does_not_publish() {
+        let controller =
+            NavigationController::new(left_turn_route(), loss_config(25.0, walk_uzmatch_config()));
+        let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        let step = WALK_MPS * DEG_PER_METER;
+        let mut state = controller.get_initial_state(walker_fix(
+            t0,
+            0,
+            0.001 - 3.0 * step,
+            0.0,
+            Some(90.0),
+            WALK_MPS,
+        ));
+        state = controller.update_user_location(
+            walker_fix(t0, 1, 0.001 - 2.0 * step, 0.0, Some(90.0), WALK_MPS),
+            state,
+        );
+        state = controller.update_user_location(
+            walker_fix(t0, 2, 0.001 - step, 0.0, Some(90.0), WALK_MPS),
+            state,
+        );
+        // Two fixes at/just past the vertex still report the OLD course (90°)
+        // although the walker is already turning north (route ahead 0°).
+        state = controller
+            .update_user_location(walker_fix(t0, 3, 0.001, 0.0, Some(90.0), WALK_MPS), state);
+        assert!(!is_off_route(&state));
+        state = controller.update_user_location(
+            walker_fix(t0, 4, 0.001, 0.4 * step, Some(90.0), WALK_MPS),
+            state,
+        );
+        assert!(!is_off_route(&state), "two noisy courses must not publish");
+        // Course catches up; walker proceeds up the north leg.
+        for n in 1..=8u64 {
+            state = controller.update_user_location(
+                walker_fix(t0, 4 + n, 0.001, step * n as f64, Some(0.0), WALK_MPS),
+                state,
+            );
+            assert!(
+                !is_off_route(&state),
+                "on-route fix {n} after noise must not publish"
+            );
+        }
+    }
+
+    /// Spec "Far sidewalk of a wide avenue": 300 m parallel to the route at an
+    /// 18 m offset with the course matching. The polyline has a straight
+    /// shape vertex in the middle so a pinned projection at a non-turn vertex
+    /// is exercised too.
+    #[test]
+    fn parallel_sidewalk_18m_300m_stays_on_route() {
+        let step1 = gen_dummy_route_step(0.0, 0.0, 0.0015, 0.0);
+        let step2 = gen_dummy_route_step(0.0015, 0.0, 0.003, 0.0);
+        let step3 = gen_dummy_route_step(0.003, 0.0, 0.003, 0.001);
+        let route = gen_route_from_steps(vec![step1, step2, step3]);
+        let controller = NavigationController::new(route, loss_config(25.0, walk_uzmatch_config()));
+        let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        let step = WALK_MPS * DEG_PER_METER;
+        let lat = 18.0 * DEG_PER_METER;
+        let mut state =
+            controller.get_initial_state(walker_fix(t0, 0, 0.0, lat, Some(90.0), WALK_MPS));
+        let seconds = (300.0 / WALK_MPS) as u64;
+        for second in 1..=seconds {
+            // ±25° course wobble, always inside the 30° the spec allows.
+            let course = 90.0 + if second % 2 == 0 { 25.0 } else { -25.0 };
+            state = controller.update_user_location(
+                walker_fix(
+                    t0,
+                    second,
+                    step * second as f64,
+                    lat,
+                    Some(course),
+                    WALK_MPS,
+                ),
+                state,
+            );
+            assert!(
+                !is_off_route(&state),
+                "parallel sidewalk published a route loss at second {second}"
+            );
+        }
+    }
+
+    /// Spec "Standing at a crossing": below the standing speed the fixes may
+    /// drift up to 20 m with an arbitrary course; nothing publishes, before
+    /// and after the standing gate engages.
+    #[test]
+    fn standing_drift_does_not_publish() {
+        let controller =
+            NavigationController::new(left_turn_route(), loss_config(25.0, walk_uzmatch_config()));
+        let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        let mut state =
+            controller.get_initial_state(walker_fix(t0, 0, 0.001, 0.0, Some(90.0), WALK_MPS));
+        let drift = [
+            (12.0, 0.0, 210.0),
+            (0.0, 15.0, 30.0),
+            (-14.0, 8.0, 300.0),
+            (19.0, -5.0, 120.0),
+            (5.0, 19.0, 250.0),
+            (-18.0, -2.0, 90.0),
+            (0.0, 0.0, 180.0),
+            (16.0, 11.0, 45.0),
+            (-9.0, -16.0, 330.0),
+            (19.0, 0.0, 200.0),
+        ];
+        for (second, (east_m, north_m, course)) in drift.iter().enumerate() {
+            state = controller.update_user_location(
+                walker_fix(
+                    t0,
+                    second as u64 + 1,
+                    0.001 + east_m * DEG_PER_METER,
+                    north_m * DEG_PER_METER,
+                    Some(*course),
+                    0.3,
+                ),
+                state,
+            );
+            assert!(
+                !is_off_route(&state),
+                "standing drift published at fix {second}"
+            );
+        }
+    }
+
+    /// Not in the design table but implied by the sidewalk requirement: a
+    /// walker crossing the avenue perpendicular to a route that runs along it
+    /// holds a 90° course for many seconds while staying inside 25 m. The
+    /// heading detector only counts fixes pinned at a route vertex ("after
+    /// the maneuver point"), so a mid-segment crossing never publishes.
+    #[test]
+    fn perpendicular_crossing_mid_segment_does_not_publish() {
+        // A long east step so the north leg (445 m ahead) is outside the snap
+        // bias: the crossing fix can only bind to the segment being crossed.
+        let step1 = gen_dummy_route_step(0.0, 0.0, 0.004, 0.0);
+        let step2 = gen_dummy_route_step(0.004, 0.0, 0.004, 0.001);
+        let route = gen_route_from_steps(vec![step1, step2]);
+        let controller = NavigationController::new(route, loss_config(25.0, walk_uzmatch_config()));
+        let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        let step = WALK_MPS * DEG_PER_METER;
+        let mut state =
+            controller.get_initial_state(walker_fix(t0, 0, 0.0004, 0.0, Some(90.0), WALK_MPS));
+        state = controller.update_user_location(
+            walker_fix(t0, 1, 0.0004 + step, 0.0, Some(90.0), WALK_MPS),
+            state,
+        );
+        // Cross north for 10 s (14 m), then walk east on the far side.
+        for n in 1..=10u64 {
+            state = controller.update_user_location(
+                walker_fix(
+                    t0,
+                    1 + n,
+                    0.0004 + step,
+                    step * n as f64,
+                    Some(0.0),
+                    WALK_MPS,
+                ),
+                state,
+            );
+            assert!(!is_off_route(&state), "crossing published at fix {n}");
+        }
+        for n in 1..=10u64 {
+            state = controller.update_user_location(
+                walker_fix(
+                    t0,
+                    11 + n,
+                    0.0004 + step * (n + 1) as f64,
+                    10.0 * step,
+                    Some(90.0),
+                    WALK_MPS,
+                ),
+                state,
+            );
+            assert!(!is_off_route(&state), "far side published at fix {n}");
+        }
+    }
+
+    /// Spec "Reroute installs a new route": a fresh controller/state starts
+    /// clean — a single noisy fix does not publish, a second real departure
+    /// publishes on the same 3-fix budget as the first.
+    #[test]
+    fn return_to_route_rearms_detection() {
+        assert_eq!(fixes_past_turn_until_loss(|_| Some(90.0)), Some(3));
+
+        // The reroute: a new route from the walker's position east, turning north later.
+        let step1 = gen_dummy_route_step(0.00105, 0.0, 0.002, 0.0);
+        let step2 = gen_dummy_route_step(0.002, 0.0, 0.002, 0.001);
+        let route = gen_route_from_steps(vec![step1, step2]);
+        let controller = NavigationController::new(route, loss_config(25.0, walk_uzmatch_config()));
+        let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(2_000_000);
+        let step = WALK_MPS * DEG_PER_METER;
+        // First fix on the new route is at its start vertex with a noisy course.
+        let mut state =
+            controller.get_initial_state(walker_fix(t0, 0, 0.00105, 0.0, Some(200.0), WALK_MPS));
+        assert!(
+            !is_off_route(&state),
+            "a single noisy fix on the new route must not publish"
+        );
+        let mut past_turn = 0usize;
+        let mut published = None;
+        for second in 1..=90u64 {
+            let lng = 0.00105 + step * second as f64;
+            state = controller.update_user_location(
+                walker_fix(t0, second, lng, 0.0, Some(90.0), WALK_MPS),
+                state,
+            );
+            if lng > 0.002 {
+                past_turn += 1;
+            }
+            if is_off_route(&state) {
+                published = Some(past_turn);
+                break;
+            }
+        }
+        assert_eq!(
+            published,
+            Some(3),
+            "the second departure must use the same budget"
         );
     }
 }

@@ -19,6 +19,9 @@ use super::UzmatchConfig;
 /// Vendor `MAX_ROUTE_LOCATION_BIAS`: segments outside this distance cannot
 /// become route-binding candidates.
 const MAX_ROUTE_LOCATION_BIAS_METERS: f64 = 200.0;
+
+/// Offsets within this many metres of a segment end count as pinned at the vertex.
+const VERTEX_PIN_EPSILON_METERS: f64 = 0.01;
 /// Conservative lower bound for meters per degree used only to build a query
 /// envelope. Exact candidate distances are still measured with Haversine.
 const METERS_PER_DEGREE: f64 = 110_000.0;
@@ -283,6 +286,39 @@ impl RouteSnapIndex {
             frame_candidates.extend(route_candidates_behind);
         }
         frame_candidates
+    }
+
+    /// Whether a matched position sits on a route vertex rather than in the
+    /// interior of its segment. A projection clamps to a vertex exactly when
+    /// the fix lies beyond the segment's end (or before its start), which is
+    /// what happens once a walker passes a maneuver without following it.
+    pub(crate) fn is_pinned_at_vertex(&self, position: &RoutePosition) -> bool {
+        let Some(segment) = usize::try_from(position.segment_index)
+            .ok()
+            .and_then(|index| self.segments.get(index))
+        else {
+            return false;
+        };
+        position.segment_offset_meters <= VERTEX_PIN_EPSILON_METERS
+            || position.segment_offset_meters >= segment.length_meters - VERTEX_PIN_EPSILON_METERS
+    }
+
+    /// The direction the route continues in from a matched position. Inside a
+    /// segment that is the segment's own bearing; at a segment's end vertex it
+    /// is the bearing of the next non-degenerate segment, so a position pinned
+    /// at a maneuver reports the post-maneuver direction. `None` past the end
+    /// of the route.
+    pub(crate) fn bearing_ahead(&self, position: &RoutePosition) -> Option<f64> {
+        let index = usize::try_from(position.segment_index).ok()?;
+        let segment = self.segments.get(index)?;
+        if position.segment_offset_meters < segment.length_meters - VERTEX_PIN_EPSILON_METERS {
+            return Some(segment.bearing);
+        }
+        self.segments
+            .iter()
+            .skip(index + 1)
+            .find(|next| next.length_meters > VERTEX_PIN_EPSILON_METERS)
+            .map(|next| next.bearing)
     }
 
     fn candidate_indices(&self, point: GeographicCoordinate) -> Vec<usize> {
@@ -633,5 +669,56 @@ mod tests {
         // Clamps past the end.
         let (end, _) = point_at_distance(&coords, &cum, total + 100.0).unwrap();
         assert!((end.lng - 0.01).abs() < 1e-9);
+    }
+    /// Design D2: past the end of a step the route direction is the NEXT
+    /// segment's bearing. A walker straight past a left turn projects onto
+    /// the pre-turn segment's end vertex, whose own bearing equals their
+    /// heading — using it would never show a divergence.
+    #[test]
+    fn heading_departure_past_step_end_uses_next_step_bearing() {
+        let coords = vec![
+            GeographicCoordinate { lat: 0.0, lng: 0.0 },
+            GeographicCoordinate {
+                lat: 0.0,
+                lng: 0.001,
+            },
+            GeographicCoordinate {
+                lat: 0.0,
+                lng: 0.001,
+            },
+            GeographicCoordinate {
+                lat: 0.001,
+                lng: 0.001,
+            },
+        ];
+        let index = RouteSnapIndex::new(&coords);
+        let east_length = index.segments[0].length_meters;
+        let position = |segment_index: u64, offset: f64| RoutePosition {
+            segment_index,
+            segment_offset_meters: offset,
+            distance_along_route_meters: 0.0,
+            coordinates: GeographicCoordinate { lat: 0.0, lng: 0.0 },
+            course_over_ground: None,
+        };
+
+        let interior = position(0, east_length / 2.0);
+        assert!(!index.is_pinned_at_vertex(&interior));
+        assert!((index.bearing_ahead(&interior).unwrap() - 90.0).abs() < 0.5);
+
+        // Pinned at the end of the east segment: skip the zero-length segment,
+        // report the north leg.
+        let at_end = position(0, east_length);
+        assert!(index.is_pinned_at_vertex(&at_end));
+        assert!(index.bearing_ahead(&at_end).unwrap().abs() < 0.5);
+
+        // Pinned at the start of the north leg: its own bearing.
+        let at_start = position(2, 0.0);
+        assert!(index.is_pinned_at_vertex(&at_start));
+        assert!(index.bearing_ahead(&at_start).unwrap().abs() < 0.5);
+
+        // Past the route end there is no direction ahead.
+        let route_end = position(2, index.segments[2].length_meters);
+        assert!(index.is_pinned_at_vertex(&route_end));
+        assert_eq!(index.bearing_ahead(&route_end), None);
     }
 }
