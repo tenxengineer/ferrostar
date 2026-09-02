@@ -4450,7 +4450,7 @@ public func FfiConverterTypeBoundingBox_lower(_ value: BoundingBox) -> RustBuffe
  * Last position and time the user was accepted as on-route, used to stabilize
  * route loss the way the vendor `Clinger` does: a full off-route deviation is
  * published only once the signal is far enough from this anchor in BOTH time
- * (`CLING_TIME`) and distance (`CLING_DISTANCE_METERS`). Until then the user
+ * (`cling_time_ms`) and distance (`cling_distance_m`). Until then the user
  * keeps clinging to the route, so one or two bad urban-canyon fixes cannot
  * start a reroute.
  */
@@ -7114,6 +7114,41 @@ public struct UzmatchConfig: Equatable, Hashable, Codable {
      * horizontal accuracy at or below this feeds the LCSM as a *fine* fix.
      */
     public var fineAccuracyThresholdM: Double
+    /**
+     * Vendor `Clinger` cling radius (guidance config `CLING_DISTANCE`,
+     * 33.25 m): a full route loss is held back until the fix is at least this
+     * far from the last on-route anchor. The vendor ships one automotive
+     * value; the pedestrian profile (UzNav's own number) lowers it.
+     */
+    public var clingDistanceM: Double
+    /**
+     * Vendor `Clinger` cling window (guidance config `CLING_TIME`, 2000 ms).
+     */
+    public var clingTimeMs: UInt64
+    /**
+     * `UzNav` pedestrian route-loss detector (no vendor equivalent: the
+     * vendor's pedestrian guidance is a separate product outside the tree).
+     * When on, a walker whose credible course diverges from the route's
+     * forward direction at a route vertex for
+     * `heading_departure_confirmations` consecutive moving fixes is
+     * published as completely off route without waiting for the distance
+     * threshold or the cling radius.
+     */
+    public var headingDepartureEnabled: Bool
+    /**
+     * Fixes slower than this (m/s) never count as a heading departure and
+     * reset the confirmation streak.
+     */
+    public var headingDepartureMinSpeedMps: Double
+    /**
+     * Course-vs-route divergence (degrees) above which a fix counts. A course
+     * whose reported accuracy is worse than this is treated as no course.
+     */
+    public var headingDepartureToleranceDeg: Double
+    /**
+     * Consecutive diverging moving fixes required before publishing.
+     */
+    public var headingDepartureConfirmations: UInt8
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -7149,7 +7184,36 @@ public struct UzmatchConfig: Equatable, Hashable, Codable {
         /**
          * UzNav policy (no vendor equivalent extracted): a location with
          * horizontal accuracy at or below this feeds the LCSM as a *fine* fix.
-         */fineAccuracyThresholdM: Double) {
+         */fineAccuracyThresholdM: Double, 
+        /**
+         * Vendor `Clinger` cling radius (guidance config `CLING_DISTANCE`,
+         * 33.25 m): a full route loss is held back until the fix is at least this
+         * far from the last on-route anchor. The vendor ships one automotive
+         * value; the pedestrian profile (UzNav's own number) lowers it.
+         */clingDistanceM: Double = Double(33.25), 
+        /**
+         * Vendor `Clinger` cling window (guidance config `CLING_TIME`, 2000 ms).
+         */clingTimeMs: UInt64 = UInt64(2000), 
+        /**
+         * `UzNav` pedestrian route-loss detector (no vendor equivalent: the
+         * vendor's pedestrian guidance is a separate product outside the tree).
+         * When on, a walker whose credible course diverges from the route's
+         * forward direction at a route vertex for
+         * `heading_departure_confirmations` consecutive moving fixes is
+         * published as completely off route without waiting for the distance
+         * threshold or the cling radius.
+         */headingDepartureEnabled: Bool = false, 
+        /**
+         * Fixes slower than this (m/s) never count as a heading departure and
+         * reset the confirmation streak.
+         */headingDepartureMinSpeedMps: Double = Double(0.8), 
+        /**
+         * Course-vs-route divergence (degrees) above which a fix counts. A course
+         * whose reported accuracy is worse than this is treated as no course.
+         */headingDepartureToleranceDeg: Double = Double(60.0), 
+        /**
+         * Consecutive diverging moving fixes required before publishing.
+         */headingDepartureConfirmations: UInt8 = UInt8(3)) {
         self.enabled = enabled
         self.standingSpeedThresholdMps = standingSpeedThresholdMps
         self.standingDetectionPeriodMs = standingDetectionPeriodMs
@@ -7158,6 +7222,12 @@ public struct UzmatchConfig: Equatable, Hashable, Codable {
         self.snapHeadingStddevDeg = snapHeadingStddevDeg
         self.snapHeadingMinSpeedMps = snapHeadingMinSpeedMps
         self.fineAccuracyThresholdM = fineAccuracyThresholdM
+        self.clingDistanceM = clingDistanceM
+        self.clingTimeMs = clingTimeMs
+        self.headingDepartureEnabled = headingDepartureEnabled
+        self.headingDepartureMinSpeedMps = headingDepartureMinSpeedMps
+        self.headingDepartureToleranceDeg = headingDepartureToleranceDeg
+        self.headingDepartureConfirmations = headingDepartureConfirmations
     }
 
     
@@ -7183,7 +7253,13 @@ public struct FfiConverterTypeUzmatchConfig: FfiConverterRustBuffer {
                 snapPositionStddevM: FfiConverterDouble.read(from: &buf), 
                 snapHeadingStddevDeg: FfiConverterDouble.read(from: &buf), 
                 snapHeadingMinSpeedMps: FfiConverterDouble.read(from: &buf), 
-                fineAccuracyThresholdM: FfiConverterDouble.read(from: &buf)
+                fineAccuracyThresholdM: FfiConverterDouble.read(from: &buf), 
+                clingDistanceM: FfiConverterDouble.read(from: &buf), 
+                clingTimeMs: FfiConverterUInt64.read(from: &buf), 
+                headingDepartureEnabled: FfiConverterBool.read(from: &buf), 
+                headingDepartureMinSpeedMps: FfiConverterDouble.read(from: &buf), 
+                headingDepartureToleranceDeg: FfiConverterDouble.read(from: &buf), 
+                headingDepartureConfirmations: FfiConverterUInt8.read(from: &buf)
         )
     }
 
@@ -7196,6 +7272,12 @@ public struct FfiConverterTypeUzmatchConfig: FfiConverterRustBuffer {
         FfiConverterDouble.write(value.snapHeadingStddevDeg, into: &buf)
         FfiConverterDouble.write(value.snapHeadingMinSpeedMps, into: &buf)
         FfiConverterDouble.write(value.fineAccuracyThresholdM, into: &buf)
+        FfiConverterDouble.write(value.clingDistanceM, into: &buf)
+        FfiConverterUInt64.write(value.clingTimeMs, into: &buf)
+        FfiConverterBool.write(value.headingDepartureEnabled, into: &buf)
+        FfiConverterDouble.write(value.headingDepartureMinSpeedMps, into: &buf)
+        FfiConverterDouble.write(value.headingDepartureToleranceDeg, into: &buf)
+        FfiConverterUInt8.write(value.headingDepartureConfirmations, into: &buf)
     }
 }
 
@@ -7343,6 +7425,12 @@ public struct UzmatchState: Equatable, Hashable, Codable {
      * Route-cling state (vendor `Clinger`): route loss is stabilized, not per-fix.
      */
     public var cling: ClingState
+    /**
+     * Consecutive moving fixes whose credible course diverged from the
+     * route's forward direction at a vertex (`UzNav` heading-departure
+     * detector). Saturates once the configured confirmations are reached.
+     */
+    public var headingDepartureStreak: UInt8
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -7364,13 +7452,19 @@ public struct UzmatchState: Equatable, Hashable, Codable {
          */temporalMatch: TemporalMatchState = TemporalMatchState(), 
         /**
          * Route-cling state (vendor `Clinger`): route loss is stabilized, not per-fix.
-         */cling: ClingState = ClingState()) {
+         */cling: ClingState = ClingState(), 
+        /**
+         * Consecutive moving fixes whose credible course diverged from the
+         * route's forward direction at a vertex (`UzNav` heading-departure
+         * detector). Saturates once the configured confirmations are reached.
+         */headingDepartureStreak: UInt8 = UInt8(0)) {
         self.standing = standing
         self.locationClass = locationClass
         self.speedHistory = speedHistory
         self.routePosition = routePosition
         self.temporalMatch = temporalMatch
         self.cling = cling
+        self.headingDepartureStreak = headingDepartureStreak
     }
 
     
@@ -7394,7 +7488,8 @@ public struct FfiConverterTypeUzmatchState: FfiConverterRustBuffer {
                 speedHistory: FfiConverterSequenceTypeSpeedSample.read(from: &buf), 
                 routePosition: FfiConverterOptionTypeRoutePosition.read(from: &buf), 
                 temporalMatch: FfiConverterTypeTemporalMatchState.read(from: &buf), 
-                cling: FfiConverterTypeClingState.read(from: &buf)
+                cling: FfiConverterTypeClingState.read(from: &buf), 
+                headingDepartureStreak: FfiConverterUInt8.read(from: &buf)
         )
     }
 
@@ -7405,6 +7500,7 @@ public struct FfiConverterTypeUzmatchState: FfiConverterRustBuffer {
         FfiConverterOptionTypeRoutePosition.write(value.routePosition, into: &buf)
         FfiConverterTypeTemporalMatchState.write(value.temporalMatch, into: &buf)
         FfiConverterTypeClingState.write(value.cling, into: &buf)
+        FfiConverterUInt8.write(value.headingDepartureStreak, into: &buf)
     }
 }
 
