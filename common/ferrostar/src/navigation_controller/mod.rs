@@ -2348,7 +2348,7 @@ mod tests {
     /// A course whose accuracy is worse than the tolerance is not credible and
     /// behaves like no course at all.
     #[test]
-    fn incredible_course_falls_back_to_distance() {
+    fn course_accuracy_beyond_tolerance_falls_back_to_distance() {
         use crate::models::CourseOverGround;
         let controller =
             NavigationController::new(left_turn_route(), loss_config(25.0, walk_uzmatch_config()));
@@ -2371,7 +2371,7 @@ mod tests {
             state = controller.update_user_location(fix(second), state);
             assert!(
                 !is_off_route(&state),
-                "an incredible course published at second {second}"
+                "a course with accuracy beyond the tolerance published at second {second}"
             );
         }
     }
@@ -2669,6 +2669,112 @@ mod tests {
         }
         assert_eq!(
             published,
+            Some(3),
+            "the second departure must use the same budget"
+        );
+    }
+    /// Spec "Matching core disabled keeps upstream behaviour": with uzmatch
+    /// off, an enabled heading detector must not run — the walker straight
+    /// past the turn is only lost when the upstream distance threshold
+    /// (25 m here) is crossed, never on the 3rd fix.
+    #[test]
+    fn uzmatch_disabled_ignores_heading_departure() {
+        let config = loss_config(
+            25.0,
+            UzmatchConfig {
+                enabled: false,
+                ..walk_uzmatch_config()
+            },
+        );
+        let fixes = fixes_past_turn_until_loss_with(config, |_| Some(90.0))
+            .expect("upstream distance detection must still publish");
+        assert!(
+            fixes > 3,
+            "the heading detector must be inert while uzmatch is disabled: {fixes}"
+        );
+        // Upstream has no cling either: the first fix beyond 25 m publishes.
+        assert!(
+            (17..=19).contains(&fixes),
+            "expected the pure distance crossing (25 m / 1.4 m/s ≈ 18 s), got {fixes}"
+        );
+    }
+
+    /// Spec "Return to route re-arms detection" on the SAME session: after a
+    /// published loss the walker rejoins the north leg going the right way;
+    /// the next evaluation starts clean — one noisy fix does not publish, and
+    /// a second real departure (straight past the next turn) publishes on
+    /// the same 3-fix budget.
+    #[test]
+    fn return_to_route_line_rearms_detection_without_reroute() {
+        let controller =
+            NavigationController::new(left_turn_route(), loss_config(25.0, walk_uzmatch_config()));
+        let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        let step = WALK_MPS * DEG_PER_METER;
+        let mut second = 0u64;
+        let mut tick = |state: NavState, lng: f64, lat: f64, course: f64| {
+            second += 1;
+            controller.update_user_location(
+                walker_fix(t0, second, lng, lat, Some(course), WALK_MPS),
+                state,
+            )
+        };
+        let mut state = controller.get_initial_state(walker_fix(
+            t0,
+            0,
+            0.001 - 3.0 * step,
+            0.0,
+            Some(90.0),
+            WALK_MPS,
+        ));
+        // Approach, stopping one fix short of the vertex, then straight past
+        // the turn: published on the 3rd fix past the vertex.
+        for n in 1..=2u64 {
+            state = tick(state, 0.001 - (3 - n) as f64 * step, 0.0, 90.0);
+        }
+        let mut lost_at = None;
+        for n in 1..=4u64 {
+            state = tick(state, 0.001 + n as f64 * step, 0.0, 90.0);
+            if is_off_route(&state) {
+                lost_at = Some(n);
+                break;
+            }
+        }
+        assert_eq!(lost_at, Some(3));
+
+        // Realises the mistake and walks north, ~4 m east of the north leg:
+        // course matches the route again, distance is tiny — back on route.
+        let east_of_leg = 0.001 + 3.0 * step;
+        let leg_end = 0.001;
+        let mut lat = 0.0;
+        for n in 1..=6u64 {
+            lat = n as f64 * step;
+            state = tick(state, east_of_leg, lat, 0.0);
+            assert!(
+                !is_off_route(&state),
+                "walking the north leg must be on route at fix {n}"
+            );
+        }
+        // One noisy course on the leg does not publish.
+        lat += step;
+        state = tick(state, east_of_leg, lat, 200.0);
+        assert!(!is_off_route(&state));
+        // Continue to one fix short of the next (right) turn.
+        while lat < leg_end - 1.5 * step {
+            lat += step;
+            state = tick(state, east_of_leg, lat, 0.0);
+            assert!(!is_off_route(&state), "still on the north leg");
+        }
+        // Second real departure: straight north past the right turn.
+        let mut lost_at = None;
+        for n in 1..=4u64 {
+            state = tick(state, east_of_leg, leg_end + n as f64 * step, 0.0);
+            if is_off_route(&state) {
+                lost_at = Some(n);
+                break;
+            }
+        }
+        assert_eq!(
+            lost_at,
             Some(3),
             "the second departure must use the same budget"
         );
